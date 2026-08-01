@@ -162,6 +162,11 @@ h1 {
   outline-offset: 4px;
 }
 
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .screen-action {
   position: absolute;
   z-index: 1;
@@ -264,12 +269,97 @@ h1 {
 }
 
 .level__bubble {
+  --bubble-x: 0px;
+  --bubble-y: 0px;
   width: clamp(17px, 4.95vmin, 22px);
   aspect-ratio: 1;
-  transform: translate(calc(-50% + 9px), calc(-50% - 6px));
+  transform: translate(calc(-50% + var(--bubble-x)), calc(-50% + var(--bubble-y)));
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 18px rgba(182, 255, 46, 0.6);
+  transition: transform 80ms linear;
+}
+
+.level__unavailable {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  transform: translate(-50%, -50%);
+  color: var(--alert);
+  font-family: "Space Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.level--unavailable .level__bubble {
+  display: none;
+}
+
+.sensor-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 22px;
+  font-family: "Space Mono", monospace;
+  font-size: clamp(9px, 2.7vmin, 12px);
+  letter-spacing: 1px;
+}
+
+.sensor-status p,
+.sensor-readouts,
+.recovery-guidance p {
+  margin: 0;
+}
+
+.sensor-status strong,
+.sensor-readouts output {
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+}
+
+.sensor-status [data-status="requesting"],
+.sensor-status [data-status="idle"] {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.sensor-status [data-status="denied"] {
+  color: var(--alert);
+}
+
+.sensor-status [data-status="unavailable"],
+.sensor-status [data-status="unsupported"] {
+  color: #ffc85c;
+}
+
+.sensor-readouts {
+  color: rgba(255, 255, 255, 0.55);
+  font-family: "Space Mono", monospace;
+  font-size: clamp(9px, 2.7vmin, 12px);
+  letter-spacing: 2px;
+}
+
+.sensor-readouts output[data-status="unavailable"] {
+  color: #ffc85c;
+}
+
+.sensor-readouts output[data-status="denied"],
+.sensor-readouts output[data-status="unsupported"] {
+  color: var(--alert);
+}
+
+.denied-content {
+  gap: clamp(6px, 2.7vmin, 12px);
+}
+
+.recovery-guidance {
+  display: grid;
+  max-width: 680px;
+  gap: 5px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: clamp(12px, 3.15vmin, 14px);
+  line-height: 1.25;
 }
 
 .denied-mark {
