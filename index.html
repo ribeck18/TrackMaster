@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#08090a">
+    <meta name="color-scheme" content="dark">
+    <title>Apex Lap Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+    <script type="module" src="./js/main.js"></script>
+  </head>
+  <body>
+    <main id="app" class="app-shell" aria-live="polite">
+      <p class="rotation-lock-hint">For the native view, disable Rotation Lock and turn your phone sideways.</p>
+
+      <section class="screen gate-screen" data-screen="enable" aria-labelledby="enable-title">
+        <div class="centered-content">
+          <p class="eyebrow">STEP 1 · PERMISSIONS</p>
+          <div class="sensor-mark" aria-hidden="true">
+            <span class="sensor-mark__core"></span>
+            <span class="sensor-mark__orbit sensor-mark__orbit--one"></span>
+            <span class="sensor-mark__orbit sensor-mark__orbit--two"></span>
+          </div>
+          <h1 id="enable-title" tabindex="-1">ENABLE SENSORS</h1>
+          <p class="screen-copy">Apex uses motion and location while you ride to measure lean angle and speed. Your run stays on this phone.</p>
+          <button class="primary-button" type="button" data-action="enable">ENABLE SENSORS</button>
+          <p class="meta-note">You can continue if a sensor is unavailable.</p>
+        </div>
+      </section>
+
+      <section class="screen gate-screen" data-screen="cal" aria-labelledby="calibrate-title" hidden>
+        <div class="centered-content calibrate-content">
+          <p class="eyebrow">STEP 2 · CALIBRATE</p>
+          <div class="level" aria-label="Spirit level placeholder; live sensor movement is added in the sensor implementation">
+            <span class="level__horizontal"></span>
+            <span class="level__vertical"></span>
+            <span class="level__ring"></span>
+            <span class="level__bubble"></span>
+          </div>
+          <h1 id="calibrate-title" tabindex="-1">LEVEL &amp; ZERO SENSORS</h1>
+          <p class="screen-copy">Mount your phone and hold the bike fully upright. Tap zero to set the current position as 0° lean.</p>
+          <button class="primary-button" type="button" data-action="zero">ZERO NOW</button>
+        </div>
+      </section>
+
+      <section class="screen placeholder-screen" data-screen="ready" aria-labelledby="ready-title" hidden>
+        <button class="screen-action" type="button" data-action="start-race">
+          <span class="visually-hidden">Start race</span>
+        </button>
+        <div class="placeholder-content">
+          <p class="eyebrow">SENSORS ZEROED</p>
+          <h1 id="ready-title" tabindex="-1">READY</h1>
+          <p class="screen-copy">The live instruments arrive in the next implementation slice.</p>
+          <p class="tap-prompt">TAP ANYWHERE TO START RACE</p>
+        </div>
+      </section>
+
+      <section class="screen placeholder-screen race-placeholder" data-screen="race" aria-labelledby="race-title" hidden>
+        <div class="rec-indicator"><span></span>REC</div>
+        <button class="end-button" type="button" data-action="end-race">END RACE</button>
+        <button class="screen-action" type="button" data-action="complete-lap">
+          <span class="visually-hidden">Complete lap and start next lap</span>
+        </button>
+        <div class="placeholder-content">
+          <p class="eyebrow">LIVE SESSION SHELL</p>
+          <h1 id="race-title" tabindex="-1">LAP <span data-lap-number>1</span></h1>
+          <p class="tap-prompt">TAP ANYWHERE FOR NEXT LAP</p>
+        </div>
+      </section>
+
+      <section class="screen placeholder-screen" data-screen="report" aria-labelledby="report-title" hidden>
+        <div class="placeholder-content">
+          <p class="eyebrow">SESSION COMPLETE</p>
+          <h1 id="report-title" tabindex="-1">RUN REPORT</h1>
+          <p class="screen-copy">Run statistics and export are reserved for the report implementation slice.</p>
+          <button class="secondary-button" type="button" data-action="new-run">NEW RUN</button>
+        </div>
+      </section>
+
+      <section class="screen gate-screen" data-screen="permission-denied" aria-labelledby="denied-title" hidden>
+        <div class="centered-content denied-content">
+          <p class="eyebrow eyebrow--alert">SENSOR ACCESS BLOCKED</p>
+          <div class="denied-mark" aria-hidden="true">!</div>
+          <h1 id="denied-title" tabindex="-1">RIDE WITH LIMITED DATA</h1>
+          <p class="screen-copy">Motion access can be restored in Settings → Safari → Motion &amp; Orientation Access. You can still continue with available sensors.</p>
+          <button class="primary-button" type="button" data-action="continue-limited">CONTINUE</button>
+        </div>
+      </section>
+    </main>
+    <noscript>Apex Lap Tracker needs JavaScript enabled.</noscript>
+  </body>
+</html>
