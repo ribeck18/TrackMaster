@@ -1,6 +1,6 @@
 # Apex Lap Tracker
 
-Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. The current app provides the forced-landscape shell, the Enable Sensors → Calibrate flow, live Ready speed and fused lean instruments, and a raw sensor simulator/record/replay harness. Timing, reports, and offline installation remain separate later issues.
+Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. The current app provides the forced-landscape shell, the Enable Sensors → Calibrate → Ready → Race flow, live speed and fused lean instruments, monotonic tap-to-lap timing, full-session sample capture, race wake lock, and a raw sensor simulator/record/replay harness. Reports and offline installation remain separate later issues.
 
 ## Run locally
 
@@ -61,4 +61,4 @@ All repository-owned assets use document-relative paths (`./css/...`, `./js/...`
 
 ## Current scope
 
-The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready renders smoothed live GPS speed in MPH, no-fix recovery, and the live fused lean gauge with signed direction. Race and Report retain only the minimum controls needed to prove routing; race instrumentation, lap timing, and report UI behavior belong to later issues.
+The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready renders smoothed live GPS speed in MPH, and Ready and Race render the same fused lean and speed sources. Race records timestamped position/speed/lean instrument samples at up to 20 Hz while retaining accepted native GPS fixes between instrument ticks; duplicate GPS bursts are coalesced. It marks laps from full-screen taps, keeps the display awake, and hands the completed timing and samples to the minimal Report transition. Detailed report UI behavior belongs to issue #8.

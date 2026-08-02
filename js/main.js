@@ -1,20 +1,34 @@
 import { createAccessOutcomeState } from "./access-outcome-state.js";
 import { createBikeFrameCalibrationWindow } from "./core/bike-frame.js";
-import { createGpsSpeedometer } from "./core/gps-speed.js";
+import {
+  createGpsSpeedometer,
+  isAcceptedLocationSample,
+  positionForAcceptedLocation,
+} from "./core/gps-speed.js";
 import {
   assertLeanEstimator,
   createLeanEstimator,
   isGyroDeliveryFresh,
 } from "./core/lean-estimator.js";
+import {
+  completeLap,
+  currentLapElapsed,
+  endLapTiming,
+  formatLapTime,
+  sessionElapsed,
+  startLapTiming,
+} from "./core/lap-timing.js";
 import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js";
+import { createSessionRecorder } from "./core/session-recorder.js";
 import {
   isRawRecorderExportEnabled,
   selectSensorSource,
 } from "./dev/dev-sensor-source.js";
-import { STATES, transition } from "./router.js";
+import { shouldMoveFocus, STATES, transition } from "./router.js";
 import { shouldDestroySensorsOnPageHide } from "./page-lifecycle.js";
 import { createBrowserSensorSource, SENSOR_STATUS } from "./sensors/sensor-source.js";
 import { calculateBubbleOffset } from "./sensors/spirit-level.js";
+import { createRaceWakeLock } from "./sensors/wake-lock.js";
 import { createLeanGaugeRenderer } from "./ui/lean-gauge.js";
 
 const screens = new Map(
@@ -38,19 +52,34 @@ const unavailableLevel = spiritLevel.querySelector(".level__unavailable");
 const enableButton = document.querySelector('[data-action="enable"]');
 const accessOutcomeState = createAccessOutcomeState();
 const gpsSpeedometer = createGpsSpeedometer();
-const speedValue = document.querySelector("[data-speed-value]");
-const gpsWarning = document.querySelector("[data-gps-warning]");
+const readySpeedValue = document.querySelector("[data-speed-value]");
+const readyGpsWarning = document.querySelector("[data-gps-warning]");
+const raceSpeedValue = document.querySelector("[data-race-speed-value]");
+const raceGpsWarning = document.querySelector("[data-race-gps-warning]");
+const raceTime = document.querySelector("[data-race-time]");
+const lapNumber = document.querySelector("[data-lap-number]");
+const lastLap = document.querySelector("[data-last-lap]");
+const reportHandoff = document.querySelector("[data-report-handoff]");
 const zeroButton = document.querySelector('[data-action="zero"]');
 const calibrationStatus = document.querySelector("[data-calibration-status]");
 const monotonicNow = globalThis.performance?.now?.bind(globalThis.performance) ?? Date.now;
 const leanEstimator = assertLeanEstimator(createLeanEstimator({ nowRef: monotonicNow }));
 const calibrationWindow = createBikeFrameCalibrationWindow({ nowRef: monotonicNow });
-const leanGauge = createLeanGaugeRenderer(document.querySelector("[data-lean-instrument]"));
+const readyLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-lean-instrument]"));
+const raceLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-race-lean-instrument]"));
+const sessionRecorder = createSessionRecorder({ nowRef: monotonicNow });
+const raceWakeLock = createRaceWakeLock();
 
 let currentState = "enable";
-let lap = 1;
 let lastGyroReceivedAt = null;
 let motionGrantedAt = null;
+let latestPosition = null;
+let raceTiming = null;
+let completedSession = null;
+let raceTimer = null;
+let lastLapActivationAt = Number.NEGATIVE_INFINITY;
+
+const MINIMUM_LAP_ACTIVATION_INTERVAL_MS = 500;
 
 function render(nextState, { moveFocus = true } = {}) {
   currentState = nextState;
@@ -73,7 +102,7 @@ function render(nextState, { moveFocus = true } = {}) {
 
 function dispatch(event) {
   const nextState = transition(currentState, event);
-  render(nextState);
+  render(nextState, { moveFocus: shouldMoveFocus(currentState, nextState) });
 }
 
 function displayRotation() {
@@ -109,13 +138,41 @@ function updateCalibrationUi() {
   calibrationStatus.dataset.ready = String(readiness.ready);
 }
 
+function currentLean(now = monotonicNow()) {
+  const reading = leanEstimator.snapshot();
+  return reading.calibrated && isGyroDeliveryFresh(lastGyroReceivedAt, now)
+    ? reading.leanDegrees
+    : null;
+}
+
+function liveSessionReading(now = monotonicNow()) {
+  const speed = gpsSpeedometer.snapshot();
+  return {
+    position: latestPosition,
+    speedMph: speed.hasSpeed ? speed.mph : null,
+    leanDegrees: currentLean(now),
+  };
+}
+
+function captureSessionSample(sample, { acceptedLocation = false } = {}) {
+  if (currentState !== "race" || !sessionRecorder.isRecording()) return;
+  if (!["location", "motion", "orientation"].includes(sample.type)) return;
+  if (sample.type === "location" && !acceptedLocation) return;
+  const now = monotonicNow();
+  sessionRecorder.record(liveSessionReading(now), now, { force: acceptedLocation });
+}
+
 function handleSensorSample(sample) {
   updateSpiritLevel(sample);
+  let acceptedLocation = false;
 
   if (sample.type === "location") {
     gpsSpeedometer.handle(sample);
+    const acceptedTimestamp = gpsSpeedometer.acceptedLocationTimestamp();
+    acceptedLocation = isAcceptedLocationSample(sample, acceptedTimestamp);
     const kinematicSample = gpsSpeedometer.kinematicSample();
-    if (kinematicSample?.timestamp === sample.timestamp) leanEstimator.update(kinematicSample);
+    latestPosition = positionForAcceptedLocation(sample, acceptedTimestamp, latestPosition);
+    if (acceptedLocation) leanEstimator.update(kinematicSample);
   } else {
     gpsSpeedometer.handle(sample);
   }
@@ -131,6 +188,8 @@ function handleSensorSample(sample) {
     if (currentState === "cal") updateCalibrationUi();
     leanEstimator.update(sample);
   }
+
+  captureSessionSample(sample, { acceptedLocation });
 
   if (sample.type !== "access") return;
   const recoveredOutcomes = accessOutcomeState.record(sample.sensor, sample.outcome);
@@ -161,6 +220,7 @@ function recoveryParagraph(text) {
 
 function applyAccessOutcomes(outcomes) {
   if (outcomes.location.status !== SENSOR_STATUS.GRANTED) {
+    latestPosition = null;
     gpsSpeedometer.clearFix();
     leanEstimator.clearLocation();
   }
@@ -214,7 +274,8 @@ function applyAccessOutcomes(outcomes) {
     motionGrantedAt = null;
     calibrationWindow.reset();
     zeroButton.disabled = false;
-    leanGauge.render(Number.NaN);
+    readyLeanGauge.render(Number.NaN);
+    raceLeanGauge.render(Number.NaN);
   } else {
     updateCalibrationUi();
   }
@@ -274,7 +335,7 @@ zeroButton.addEventListener("click", () => {
         now - motionGrantedAt > 1_000 &&
         !isGyroDeliveryFresh(lastGyroReceivedAt, now);
       if (gyroTimedOut) {
-        leanGauge.render(Number.NaN);
+        readyLeanGauge.render(Number.NaN);
         dispatch("ZERO");
         return;
       }
@@ -283,7 +344,7 @@ zeroButton.addEventListener("click", () => {
     }
     try {
       leanEstimator.calibrate(readiness.gravity);
-      leanGauge.render(0);
+      readyLeanGauge.render(0);
     } catch (error) {
       console.error("Bike-frame calibration failed.", error);
       calibrationWindow.reset();
@@ -291,26 +352,82 @@ zeroButton.addEventListener("click", () => {
       return;
     }
   } else {
-    leanGauge.render(Number.NaN);
+    readyLeanGauge.render(Number.NaN);
   }
   dispatch("ZERO");
 });
 
+function renderRaceTimer() {
+  if (currentState !== "race" || !raceTiming) return;
+  const elapsed = currentLapElapsed(raceTiming, monotonicNow());
+  const formatted = formatLapTime(elapsed);
+  if (raceTime.textContent !== formatted) raceTime.textContent = formatted;
+  raceTime.setAttribute("aria-label", `Current lap time ${formatted}`);
+}
+
+function startRaceTimer() {
+  if (raceTimer !== null) window.clearInterval(raceTimer);
+  raceTimer = window.setInterval(renderRaceTimer, 100);
+  renderRaceTimer();
+}
+
+function stopRaceTimer() {
+  if (raceTimer === null) return;
+  window.clearInterval(raceTimer);
+  raceTimer = null;
+}
+
+function acceptLapActivation(now) {
+  if (now - lastLapActivationAt < MINIMUM_LAP_ACTIVATION_INTERVAL_MS) return false;
+  lastLapActivationAt = now;
+  return true;
+}
+
 document.querySelector('[data-action="start-race"]').addEventListener("click", () => {
-  lap = 1;
-  document.querySelector("[data-lap-number]").textContent = String(lap);
+  if (currentState !== "ready") return;
+  const now = monotonicNow();
+  lastLapActivationAt = now;
+  raceTiming = startLapTiming(now);
+  completedSession = null;
+  lapNumber.textContent = "1";
+  lastLap.textContent = "--:--.-";
+  raceTime.textContent = "00:00.0";
+  sessionRecorder.start(now);
+  sessionRecorder.record(liveSessionReading(now), now, { force: true });
   rawRecorder?.startRecording();
   dispatch("START_RACE");
+  startRaceTimer();
+  void raceWakeLock.start();
 });
 
 document.querySelector('[data-action="complete-lap"]').addEventListener("click", () => {
-  lap += 1;
-  document.querySelector("[data-lap-number]").textContent = String(lap);
+  if (currentState !== "race" || !raceTiming) return;
+  const now = monotonicNow();
+  // A second tap from a Ready-screen double-tap must not create a near-zero lap.
+  if (!acceptLapActivation(now)) return;
+  raceTiming = completeLap(raceTiming, now);
+  const completedLap = raceTiming.laps.at(-1);
+  lapNumber.textContent = String(raceTiming.lapNumber);
+  lastLap.textContent = formatLapTime(completedLap.duration);
+  raceTime.textContent = "00:00.0";
   dispatch("NEXT_LAP");
 });
 
 document.querySelector('[data-action="end-race"]').addEventListener("click", (event) => {
+  event.preventDefault();
   event.stopPropagation();
+  event.stopImmediatePropagation();
+  if (currentState !== "race" || !raceTiming) return;
+
+  const now = monotonicNow();
+  raceTiming = endLapTiming(raceTiming, now);
+  sessionRecorder.record(liveSessionReading(now), now, { force: true });
+  const recordedSession = sessionRecorder.stop(now);
+  completedSession = Object.freeze({ timing: raceTiming, samples: recordedSession.samples });
+  reportHandoff.textContent = `${raceTiming.laps.length} completed laps · ${formatLapTime(sessionElapsed(raceTiming))} total · ${recordedSession.samples.length} samples ready`;
+  stopRaceTimer();
+  void raceWakeLock.stop();
+
   if (rawRecorder) {
     const rawLog = rawRecorder.stopRecording();
     void exportRawSensorLog(rawLog).catch((error) => console.error("Raw sensor export failed.", error));
@@ -319,6 +436,8 @@ document.querySelector('[data-action="end-race"]').addEventListener("click", (ev
 });
 
 document.querySelector('[data-action="new-run"]').addEventListener("click", () => {
+  raceTiming = null;
+  completedSession = null;
   dispatch("NEW_RUN");
 });
 
@@ -327,20 +446,25 @@ document.querySelector('[data-action="continue-limited"]').addEventListener("cli
   dispatch("CONTINUE_LIMITED");
 });
 
-function renderInstruments() {
-  const reading = gpsSpeedometer.snapshot();
+function renderSpeed(value, warning, reading) {
   const nextValue = reading.hasSpeed ? String(reading.mph) : "--";
-  if (speedValue.textContent !== nextValue) speedValue.textContent = nextValue;
-  speedValue.setAttribute(
+  if (value.textContent !== nextValue) value.textContent = nextValue;
+  value.setAttribute(
     "aria-label",
     reading.hasSpeed ? `Speed ${reading.mph} miles per hour` : "Speed unavailable",
   );
-  if (gpsWarning.textContent !== reading.warning) gpsWarning.textContent = reading.warning;
-  gpsWarning.classList.toggle("is-clear", reading.warning === "");
+  if (warning.textContent !== reading.warning) warning.textContent = reading.warning;
+  warning.classList.toggle("is-clear", reading.warning === "");
+}
 
-  const leanReading = leanEstimator.snapshot();
-  const gyroFresh = isGyroDeliveryFresh(lastGyroReceivedAt, monotonicNow());
-  leanGauge.render(leanReading.calibrated && gyroFresh ? leanReading.leanDegrees : Number.NaN);
+function renderInstruments() {
+  const speedReading = gpsSpeedometer.snapshot();
+  renderSpeed(readySpeedValue, readyGpsWarning, speedReading);
+  renderSpeed(raceSpeedValue, raceGpsWarning, speedReading);
+
+  const leanDegrees = currentLean();
+  readyLeanGauge.render(leanDegrees ?? Number.NaN);
+  raceLeanGauge.render(leanDegrees ?? Number.NaN);
   if (currentState === "cal") updateCalibrationUi();
 }
 
@@ -355,6 +479,8 @@ window.addEventListener("pagehide", (event) => {
   // UI permanently stale. Final navigations still release both platform watches.
   if (shouldDestroySensorsOnPageHide(event)) {
     window.clearInterval(instrumentRenderTimer);
+    stopRaceTimer();
+    void raceWakeLock.destroy();
     sensorSource.destroy();
   }
 });

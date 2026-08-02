@@ -21,6 +21,21 @@ function radians(degrees) {
   return (degrees * Math.PI) / 180;
 }
 
+export function isAcceptedLocationSample(sample, acceptedTimestamp) {
+  return Number.isFinite(acceptedTimestamp) && sample?.timestamp === acceptedTimestamp;
+}
+
+/** Keeps report coordinates aligned with the exact fix accepted by the speedometer. */
+export function positionForAcceptedLocation(sample, acceptedTimestamp, currentPosition = null) {
+  if (
+    !isAcceptedLocationSample(sample, acceptedTimestamp) ||
+    !isValidCoordinate(sample.latitude, sample.longitude)
+  ) {
+    return currentPosition;
+  }
+  return Object.freeze({ latitude: sample.latitude, longitude: sample.longitude });
+}
+
 function normalizeHeading(degrees) {
   return ((degrees % 360) + 360) % 360;
 }
@@ -92,6 +107,7 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
   let courseHeadingDegrees = null;
   let evidenceSpeedMps = null;
   let accuracy = null;
+  let acceptedLocationTimestamp = null;
 
   function clearFix() {
     previousPosition = null;
@@ -103,6 +119,7 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
     courseHeadingDegrees = null;
     evidenceSpeedMps = null;
     accuracy = null;
+    acceptedLocationTimestamp = null;
   }
 
   function updateDisplayedValue() {
@@ -122,7 +139,7 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
       !Number.isFinite(sample.timestamp) ||
       (previousPosition !== null && sample.timestamp <= previousPosition.timestamp)
     ) {
-      return;
+      return false;
     }
 
     hasFix = true;
@@ -154,17 +171,19 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
       longitude: sample.longitude,
     };
 
-    if (metresPerSecond === null) return;
+    if (metresPerSecond === null) return true;
     const mph = metresPerSecond * METRES_PER_SECOND_TO_MPH;
     smoothedMph =
       smoothedMph === null ? mph : smoothedMph + smoothingFactor * (mph - smoothedMph);
     speedSource = source;
     updateDisplayedValue();
+    return true;
   }
 
   function handle(sample) {
+    acceptedLocationTimestamp = null;
     if (sample?.type === "location") {
-      handleLocation(sample);
+      if (handleLocation(sample)) acceptedLocationTimestamp = sample.timestamp;
     } else if (
       sample?.type === "access" &&
       sample.sensor === "location" &&
@@ -199,5 +218,11 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
     });
   }
 
-  return Object.freeze({ handle, clearFix, kinematicSample, snapshot });
+  return Object.freeze({
+    handle,
+    clearFix,
+    kinematicSample,
+    snapshot,
+    acceptedLocationTimestamp: () => acceptedLocationTimestamp,
+  });
 }

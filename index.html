@@ -103,17 +103,57 @@
         </div>
       </section>
 
-      <section class="screen placeholder-screen race-placeholder" data-screen="race" aria-labelledby="race-title" hidden>
+      <section class="screen race-screen" data-screen="race" aria-labelledby="race-title" hidden>
         <div class="rec-indicator"><span></span>REC</div>
         <button class="end-button" type="button" data-action="end-race">END RACE</button>
         <button class="screen-action" type="button" data-action="complete-lap">
           <span class="visually-hidden">Complete lap and start next lap</span>
         </button>
-        <div class="placeholder-content">
-          <p class="eyebrow">LIVE SESSION SHELL</p>
-          <h1 id="race-title" tabindex="-1">LAP <span data-lap-number>1</span></h1>
-          <p class="sensor-readouts">LEAN <output data-readout="motion">WAITING</output> · SPEED <output data-readout="location">WAITING</output></p>
-          <p class="tap-prompt">TAP ANYWHERE FOR NEXT LAP</p>
+        <h1 id="race-title" class="visually-hidden" tabindex="-1">Race</h1>
+        <div class="race-instruments" aria-describedby="race-next-lap-prompt">
+          <div class="ready-top">
+            <div class="instrument-column speed-instrument">
+              <p class="instrument-eyebrow">SPEED</p>
+              <output class="speed-value race-speed-value" data-race-speed-value aria-label="Speed unavailable">--</output>
+              <p class="instrument-unit">MPH</p>
+              <p class="gps-warning" data-race-gps-warning role="status">GPS · NO FIX</p>
+            </div>
+            <div class="instrument-divider" aria-hidden="true"></div>
+            <div class="instrument-column lean-instrument race-lean-instrument" data-race-lean-instrument>
+              <p class="instrument-eyebrow">LEAN ANGLE</p>
+              <div class="lean-gauge">
+                <svg viewBox="0 0 400 232" role="img" aria-labelledby="race-gauge-title race-gauge-description">
+                  <title id="race-gauge-title">Lean angle gauge</title>
+                  <desc id="race-gauge-description">Current race lean angle</desc>
+                  <path class="gauge-track" d="M 56.582 97.950 A 182 182 0 0 1 343.418 97.950"></path>
+                  <path class="gauge-active" d="M 200 28 A 182 182 0 0 1 200 28"></path>
+                  <g class="gauge-ticks">
+                    <line class="gauge-tick gauge-tick--major" x1="93.934" y1="103.934" x2="76.963" y2="86.963"></line>
+                    <line class="gauge-tick" x1="120" y1="71.436" x2="113" y2="59.312"></line>
+                    <line class="gauge-tick" x1="158.589" y1="55.452" x2="154.965" y2="41.929"></line>
+                    <line class="gauge-tick gauge-tick--major" x1="200" y1="60" x2="200" y2="36"></line>
+                    <line class="gauge-tick" x1="241.411" y1="55.452" x2="245.035" y2="41.929"></line>
+                    <line class="gauge-tick" x1="280" y1="71.436" x2="287" y2="59.312"></line>
+                    <line class="gauge-tick gauge-tick--major" x1="306.066" y1="103.934" x2="323.037" y2="86.963"></line>
+                  </g>
+                  <line class="gauge-needle" x1="200" y1="210" x2="200" y2="94"></line>
+                  <circle class="gauge-hub" cx="200" cy="210" r="14"></circle>
+                </svg>
+              </div>
+              <div class="lean-readout">
+                <output class="lean-value" aria-label="Lean angle 0 degrees">0°</output>
+                <span class="lean-direction">LEVEL</span>
+              </div>
+            </div>
+          </div>
+          <p id="race-next-lap-prompt" class="race-tap-prompt">TAP ANYWHERE FOR NEXT LAP</p>
+          <div class="race-bottom">
+            <span class="timer-eyebrow">LAP TIME</span>
+            <output class="race-time" data-race-time aria-label="Current lap time zero minutes">00:00.0</output>
+            <span class="race-lap-number">LAP <output data-lap-number>1</output></span>
+            <span class="timer-divider" aria-hidden="true"></span>
+            <span class="last-lap">LAST <output data-last-lap>--:--.-</output></span>
+          </div>
         </div>
       </section>
 
@@ -121,7 +161,7 @@
         <div class="placeholder-content">
           <p class="eyebrow">SESSION COMPLETE</p>
           <h1 id="report-title" tabindex="-1">RUN REPORT</h1>
-          <p class="screen-copy">Run statistics and export are reserved for the report implementation slice.</p>
+          <p class="screen-copy" data-report-handoff>Session data is ready for the report.</p>
           <button class="secondary-button" type="button" data-action="new-run">NEW RUN</button>
         </div>
       </section>

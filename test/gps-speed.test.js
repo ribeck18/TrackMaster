@@ -7,8 +7,11 @@ import {
   deriveSpeedMetresPerSecond,
   GPS_SPEED_SOURCE,
   METRES_PER_SECOND_TO_MPH,
+  isAcceptedLocationSample,
+  positionForAcceptedLocation,
 } from "../js/core/gps-speed.js";
 import { createRawSensorLog } from "../js/core/raw-sensor-log.js";
+import { createSessionRecorder } from "../js/core/session-recorder.js";
 import { createReplaySensorSource } from "../js/dev/replay.js";
 import { createSyntheticSensorSource } from "../js/dev/simulator.js";
 
@@ -67,6 +70,66 @@ test("stale and non-finite timestamp fixes cannot replace a current platform rea
 
   speedometer.handle(fix({ timestamp: 2_000, speed: 20 }));
   assert.equal(speedometer.snapshot().mph, 45, "newer fixes still update normally");
+});
+
+test("report position changes only with the exact timestamp accepted for speed", () => {
+  const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
+  let position = null;
+
+  function handle(sample) {
+    speedometer.handle(sample);
+    position = positionForAcceptedLocation(
+      sample,
+      speedometer.acceptedLocationTimestamp(),
+      position,
+    );
+  }
+
+  handle(fix({ timestamp: 1_000, latitude: 10, longitude: 20, speed: 10 }));
+  assert.deepEqual(position, { latitude: 10, longitude: 20 });
+  assert.equal(speedometer.snapshot().mph, 22);
+
+  handle(fix({ timestamp: 500, latitude: 50, longitude: 60, speed: 0 }));
+  assert.deepEqual(position, { latitude: 10, longitude: 20 });
+  assert.equal(speedometer.snapshot().mph, 22, "reordered coordinates cannot desynchronise accepted speed");
+
+  handle(fix({ timestamp: 1_000, latitude: 51, longitude: 61, speed: 0 }));
+  assert.deepEqual(position, { latitude: 10, longitude: 20 });
+  assert.equal(speedometer.snapshot().mph, 22, "duplicate timestamps are not mistaken for acceptance");
+
+  handle(fix({ timestamp: 2_000, latitude: 11, longitude: 21, speed: 20 }));
+  assert.deepEqual(position, { latitude: 11, longitude: 21 });
+  assert.equal(speedometer.snapshot().mph, 45);
+});
+
+test("null and non-finite rejected fixes feed neither lean nor forced session capture", () => {
+  const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
+  const recorder = createSessionRecorder();
+  recorder.start(0);
+  let position = null;
+  let leanUpdates = 0;
+
+  function integrate(sample, captureTimestamp) {
+    speedometer.handle(sample);
+    const acceptedTimestamp = speedometer.acceptedLocationTimestamp();
+    const accepted = isAcceptedLocationSample(sample, acceptedTimestamp);
+    position = positionForAcceptedLocation(sample, acceptedTimestamp, position);
+    if (accepted) {
+      leanUpdates += 1;
+      recorder.record({ position, speedMph: speedometer.snapshot().mph }, captureTimestamp, { force: true });
+    }
+  }
+
+  integrate(fix({ timestamp: 1_000, latitude: 10, longitude: 20, speed: 10 }), 0);
+  integrate(fix({ timestamp: null, latitude: 30, longitude: 40, speed: 0 }), 20);
+  integrate(fix({ timestamp: Number.NaN, latitude: 31, longitude: 41, speed: 0 }), 30);
+  integrate(fix({ timestamp: Number.POSITIVE_INFINITY, latitude: 32, longitude: 42, speed: 0 }), 40);
+
+  assert.equal(leanUpdates, 1);
+  assert.equal(recorder.sampleCount(), 1);
+  assert.deepEqual(position, { latitude: 10, longitude: 20 });
+  assert.equal(speedometer.snapshot().mph, 22);
+  recorder.stop(40);
 });
 
 test("missing platform speed is derived from successive timestamped positions", () => {

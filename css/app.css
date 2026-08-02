@@ -185,17 +185,20 @@ h1 {
 }
 
 .screen-action ~ .placeholder-content,
-.screen-action ~ .ready-instruments {
+.screen-action ~ .ready-instruments,
+.screen-action ~ .race-instruments {
   position: relative;
   z-index: 1;
   pointer-events: none;
 }
 
-.ready-screen {
+.ready-screen,
+.race-screen {
   padding: max(40px, var(--safe-block-start)) max(40px, var(--safe-inline-end)) 0 max(62px, var(--safe-inline-start));
 }
 
-.ready-instruments {
+.ready-instruments,
+.race-instruments {
   display: flex;
   width: 100%;
   height: 100%;
@@ -387,6 +390,91 @@ h1 {
   color: var(--accent);
   font-size: clamp(9px, 2.9vmin, 13px);
   letter-spacing: 3px;
+}
+
+.race-speed-value,
+.race-lean-instrument .lean-value {
+  color: var(--accent);
+  text-shadow: 0 0 40px rgba(182, 255, 46, 0.35);
+}
+
+.race-screen .instrument-unit {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.race-speed-value {
+  font-size: clamp(96px, 39.6vmin, 176px);
+}
+
+.race-lean-instrument .lean-readout {
+  margin-top: 8px;
+}
+
+.race-lean-instrument .lean-value {
+  text-shadow: 0 0 30px rgba(182, 255, 46, 0.4);
+}
+
+.race-lean-instrument .lean-direction {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.race-tap-prompt,
+.race-lap-number,
+.last-lap {
+  margin: 0;
+  font-family: "Space Mono", monospace;
+  text-transform: uppercase;
+}
+
+.race-tap-prompt {
+  position: absolute;
+  right: 0;
+  bottom: min(92px, 20.7vmin);
+  left: 0;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: clamp(8px, 2.5vmin, 11px);
+  letter-spacing: 3px;
+  text-align: center;
+}
+
+.race-bottom {
+  display: flex;
+  height: min(82px, 18.5vmin);
+  min-height: 62px;
+  flex: 0 0 min(82px, 18.5vmin);
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  border-top: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.race-time {
+  color: var(--text);
+  font-family: "Rajdhani", sans-serif;
+  font-size: clamp(44px, 14.9vmin, 66px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.race-lap-number {
+  color: var(--accent);
+  font-size: clamp(10px, 3.15vmin, 14px);
+  letter-spacing: 3px;
+}
+
+.race-lap-number output,
+.last-lap output {
+  color: inherit;
+  font: inherit;
+}
+
+.last-lap {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: clamp(9px, 2.9vmin, 13px);
+  letter-spacing: 2px;
 }
 
 .sensor-mark {
@@ -610,9 +698,11 @@ h1 {
 
 .rec-indicator {
   position: absolute;
+  z-index: 2;
   top: max(16px, var(--safe-block-start));
-  left: max(24px, var(--safe-inline-start));
+  left: max(62px, var(--safe-inline-start));
   display: flex;
+  pointer-events: none;
   align-items: center;
   gap: 8px;
   color: var(--alert);
@@ -624,15 +714,22 @@ h1 {
   width: 9px;
   aspect-ratio: 1;
   border-radius: 50%;
+  animation: rec-pulse 1.25s ease-in-out infinite;
   background: var(--alert);
   box-shadow: 0 0 10px var(--alert);
 }
 
+@keyframes rec-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 .end-button {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   top: max(12px, var(--safe-block-start));
-  right: max(24px, var(--safe-inline-end));
+  right: max(40px, var(--safe-inline-end));
   padding: 9px 18px;
   border-radius: 20px;
   background: var(--alert);
@@ -690,7 +787,8 @@ noscript {
 
 @media (orientation: landscape) and (max-height: 375px),
   (orientation: portrait) and (max-width: 375px) {
-  .ready-screen {
+  .ready-screen,
+  .race-screen {
     padding: max(20px, var(--safe-block-start)) max(16px, var(--safe-inline-end)) 0 max(28px, var(--safe-inline-start));
   }
 
@@ -736,7 +834,8 @@ noscript {
     letter-spacing: 3px;
   }
 
-  .ready-bottom {
+  .ready-bottom,
+  .race-bottom {
     height: min(62px, 17vmin);
     min-height: 54px;
     flex-basis: min(62px, 17vmin);
@@ -744,13 +843,26 @@ noscript {
   }
 
   .timer-eyebrow,
-  .ready-prompt {
+  .ready-prompt,
+  .race-lap-number,
+  .last-lap {
     font-size: 8px;
     letter-spacing: 1px;
   }
 
-  .ready-time {
+  .ready-time,
+  .race-time {
     font-size: clamp(36px, 11vmin, 44px);
+  }
+
+  .race-tap-prompt {
+    bottom: min(68px, 18.5vmin);
+    font-size: 7px;
+    letter-spacing: 2px;
+  }
+
+  .rec-indicator {
+    left: max(28px, var(--safe-inline-start));
   }
 
   .timer-divider {
@@ -782,5 +894,9 @@ noscript {
   .gauge-active,
   .gauge-needle {
     transition: none;
+  }
+
+  .rec-indicator span {
+    animation: none;
   }
 }

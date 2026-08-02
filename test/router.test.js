@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { STATES, isState, transition } from "../js/router.js";
+import { shouldMoveFocus, STATES, isState, transition } from "../js/router.js";
 
 test("the shell exposes exactly the six approved states", () => {
   assert.deepEqual(STATES, [
@@ -28,6 +28,13 @@ test("the normal rider flow reaches every primary screen", () => {
   assert.equal(state, "report");
   state = transition(state, "NEW_RUN");
   assert.equal(state, "ready");
+});
+
+test("same-state NEXT_LAP preserves keyboard focus on the full-screen lap button", () => {
+  const nextState = transition("race", "NEXT_LAP");
+  assert.equal(nextState, "race");
+  assert.equal(shouldMoveFocus("race", nextState), false);
+  assert.equal(shouldMoveFocus("ready", transition("ready", "START_RACE")), true);
 });
 
 test("permission denial has a non-blocking recovery route", () => {

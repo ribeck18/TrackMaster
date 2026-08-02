@@ -30,3 +30,11 @@ export function transition(currentState, event) {
 
   return TRANSITIONS[currentState][event] ?? currentState;
 }
+
+/** Same-screen interactions retain the keyboard user's active control. */
+export function shouldMoveFocus(currentState, nextState) {
+  if (!isState(currentState) || !isState(nextState)) {
+    throw new TypeError("Focus policy requires known app states.");
+  }
+  return currentState !== nextState;
+}
