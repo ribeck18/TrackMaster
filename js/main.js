@@ -35,6 +35,7 @@ import {
 } from "./dev/dev-sensor-source.js";
 import { shouldMoveFocus, STATES, transition } from "./router.js";
 import { shouldDestroySensorsOnPageHide } from "./page-lifecycle.js";
+import { registerServiceWorker } from "./register-service-worker.js";
 import { createBrowserSensorSource, SENSOR_STATUS } from "./sensors/sensor-source.js";
 import { calculateBubbleOffset } from "./sensors/spirit-level.js";
 import { createRaceWakeLock } from "./sensors/wake-lock.js";
@@ -47,6 +48,10 @@ const screens = new Map(
     screen,
   ]),
 );
+
+void registerServiceWorker().catch((error) => {
+  console.warn("Offline installation is unavailable.", error);
+});
 
 const browserSensorSource = createBrowserSensorSource();
 const selectedSensorSource = await selectSensorSource({

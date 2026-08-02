@@ -1,32 +1,113 @@
 # Apex Lap Tracker
 
-Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. The current app provides the forced-landscape shell, the Enable Sensors → Calibrate → Ready → Race → Report flow, live speed and fused lean instruments, monotonic tap-to-lap timing, immutable run aggregation, full-session sample capture, race wake lock, and a raw sensor simulator/record/replay harness. Offline installation remains a later issue.
+Apex is a zero-dependency, client-side motorcycle track-day instrument for a bar-mounted iPhone. It provides the Enable Sensors → Calibrate → Ready → Race → Report flow, live GPS speed and fused lean instruments, tap-to-lap timing and trim, an offline track map, and stateless JSON/GPX export. Ready renders smoothed live GPS speed in MPH and the shared fused lean gauge before a race begins. All run state stays in memory; the app does not use localStorage, IndexedDB, a database, or a server.
 
 ## Run locally
 
-No packages or build step are required. Serve the repository root with any static HTTP server; for example:
+No packages or build step are required. Serve the repository root with any static HTTP server:
 
 ```sh
 python3 -m http.server 8000
 ```
 
-Then open <http://localhost:8000/>. Run the routing tests with:
+Open <http://localhost:8000/> and run the tests with:
 
 ```sh
 npm test
 ```
 
-> Local HTTP is useful for layout work only. iPhone motion and location APIs require a secure HTTPS deployment.
+Localhost is useful for layout, simulator, and replay work. Real iPhone motion and location permissions require the production HTTPS deployment.
+
+## Offline PWA behavior
+
+`manifest.webmanifest`, the iOS metadata, and the local icons make Apex launch from the iOS Home Screen in standalone mode. The service worker is registered with document-relative URL and scope, so the same files work at GitHub Pages' `/TrackMaster/` repository subpath.
+
+A successful service-worker install atomically precaches the HTML, manifest, CSS, every application module, all icons, and locally hosted Rajdhani/Space Mono font files. Navigation and known assets are then served cache-first. Unlisted files, including temporary replay logs, are network-only and are never added to the cache. Run data is never cached or persisted.
+
+The cache name contains the deployment stamp in `sw.js`. For every deployment that changes a precached file, update `BUILD_STAMP`. On an online launch the registration bypasses the HTTP cache and checks `sw.js`; the new worker must cache its complete shell before it activates. Activation removes older Apex caches and claims clients. A failed update leaves the prior complete build active, while a successful update is used on the next launch without clearing site data.
+
+## Deploy with GitHub Pages
+
+GitHub Pages provides the HTTPS origin required by iPhone sensor permissions.
+
+1. Push the repository to the branch that should be published (normally the default branch).
+2. On GitHub, open **Settings → Pages**.
+3. Under **Build and deployment**, select **Deploy from a branch**.
+4. Select the published branch and **`/(root)`**, then select **Save**.
+5. Wait for the Pages deployment to report success. GitHub displays the public URL on the same page.
+6. Open `https://ribeck18.github.io/TrackMaster/` (including the case-sensitive repository path) in iPhone Safari. Confirm the first screen reads **ENABLE SENSORS**.
+
+Pages is repository configuration: application code and local tests cannot enable it, confirm the selected branch, or prove a deployment is live. A repository administrator must perform and verify these steps. Public repositories support Pages on GitHub Free; private-repository availability depends on the account plan.
+
+All repository-owned runtime URLs must remain relative (`./...` or CSS-relative). Never change them to root-absolute `/...` paths; those would escape `/TrackMaster/` on Pages.
+
+## Install on an iPhone Home Screen
+
+Do this on reliable Wi-Fi or cellular service before travelling to the circuit:
+
+1. In **Safari** (not an in-app browser), open the exact Pages URL above and let it finish loading.
+2. Reload once while still online. This gives the newly installed service worker control of the page.
+3. Tap **Share → Add to Home Screen → Add**.
+4. Launch **Apex** from its Home Screen icon once while still online. It should fill the screen without Safari's address or toolbar chrome.
+5. Grant sensors and complete the offline verification below before relying on it at a track.
+
+Keep the Home Screen app installed. When a new version is deployed, launch it once while online to let the update download; no cache clearing or reinstall is required.
+
+## Sensor permissions and recovery
+
+Tap **ENABLE SENSORS** once and respond to both iOS prompts. Enable **Precise Location** for the best GPS readings. GPS receives a satellite radio fix and does not require cellular data, but the page must already be installed and cached.
+
+Apex degrades rather than dead-ending: without motion, lean shows `N/A`; without a valid location fix, speed shows `--` and `GPS · NO FIX`; with a valid stationary fix, speed shows `0`. Lap timing and report/export remain available.
+
+If a permission was denied, the web page usually cannot show the prompt again:
+
+- **Motion:** open **Settings → Apps → Safari → Motion & Orientation Access** (or **Settings → Safari** on older iOS), enable it, fully close Apex, and reopen it.
+- **Location:** open **Settings → Privacy & Security → Location Services → Safari Websites** (or the Apex Home Screen app when listed), choose **While Using**, and enable **Precise Location**. Then fully close and reopen Apex.
+- If the relevant setting is still stuck, reconnect to the internet, remove the Home Screen icon, remove the `ribeck18.github.io` entry under **Settings → Safari → Advanced → Website Data**, revisit the Pages URL, grant access, and install again. Removing website data is a last-resort permission recovery step, not an update procedure.
+
+Permission labels vary slightly by iOS release. The denied-state screen repeats the in-app recovery direction and always permits continuing with available sensors.
+
+## Prove cold offline operation before the track
+
+This physical-iPhone check is required; desktop tests cannot substitute for it.
+
+1. Install and open Apex online, grant both permissions, and reach **Calibrate**.
+2. Fully close the Home Screen app (remove it from the app switcher).
+3. Enable **Airplane Mode**, then separately confirm both Wi-Fi and cellular data are off.
+4. Launch Apex from the Home Screen icon. A cold launch must reach **ENABLE SENSORS** without an error page.
+5. Complete a short end-to-end run: enable sensors, hold the phone stable and **ZERO NOW**, tap to start, record at least one lap tap, **END RACE**, inspect the report, and **SAVE RUN**.
+6. Save/share the JSON/GPX to an offline-capable target such as **On My iPhone** in Files. A cloud-only destination may wait for connectivity.
+7. Fully close and cold-launch Apex offline a second time. Repeat after every deployment used for a track day.
+
+Airplane Mode can affect Assisted GPS time-to-first-fix, so `GPS · NO FIX` may remain longer outdoors even though satellite GPS itself works without data. Run this check outdoors as well as indoors.
 
 ## Developer sensor harness
 
-The normal rider flow always uses the browser motion and location source. Developer sources are selected only by URL parameters; there is no in-app control or route to them.
+Developer sources are selected only by URL parameters; there is no rider-facing switch and no application persistence.
 
-- `?dev-sensors=simulator` replaces hardware with a deterministic 38-second session. It begins with a stable calibration interval, then includes low-speed (under 15 mph) manoeuvring, physically matched constant-radius corners in both directions, an 85-to-12 mph upright braking event, and gradual acceleration/finish sections. Its source readings include gravity, normalized three-axis body gyro rate, and orientation alongside GPS. Add `&dev-rate=4` to replay four times faster.
-- `?dev-sensors=replay&replay-log=./path/to/raw-log.json` loads an exported raw JSON log and emits its readings through the same `requestAccess()` / `subscribe()` / `destroy()` source seam. `dev-rate` changes only delivery speed; sample values and timestamps are unchanged.
-- `?dev-recorder=1` keeps real hardware selected, records every timestamped reading directly at the source seam during Race, and exports the in-memory JSON log when **END RACE** is tapped.
+- `?dev-sensors=simulator` replaces hardware with a deterministic 38-second session. It begins with a stable calibration interval, then includes low-speed (under 15 mph) manoeuvring, physically matched constant-radius corners in both directions, an 85-to-12 mph upright braking event, and gradual acceleration/finish sections. Its source readings include gravity, normalized three-axis body gyro rate, and orientation alongside GPS. Add `&dev-rate=4` to deliver it four times faster.
+- `?dev-sensors=replay&replay-log=./trackmaster-raw-sensors.json` fetches a raw log and replays its untouched values and timestamps. `dev-rate` changes delivery timing only.
+- `?dev-recorder=1` keeps real hardware selected and records untouched source readings during Race. **END RACE** exports the in-memory raw JSON log automatically.
 
 Recording uses RAM only. Export uses the Web Share API or an in-memory Blob download and never writes to localStorage, IndexedDB, or another application store. The log loader accepts JSON text, `Blob`/`File`, or a parsed log object.
+
+### Capture and export a first-track recorder log
+
+1. Before leaving coverage, open `https://ribeck18.github.io/TrackMaster/?dev-recorder=1` in Safari and keep that tab available. Confirm the URL still contains `dev-recorder=1`; the normal Home Screen launch does not enable recording.
+2. At the track, mount the phone rigidly, open that recorder URL, grant sensors, calibrate while fully upright and stationary, and begin the session.
+3. After stopping safely, tap **END RACE**. In the automatic share sheet save `trackmaster-raw-sensors.json` to **On My iPhone**, AirDrop it, or choose another destination known to work offline. Do not cancel: the raw log exists only in RAM and there is no later retry button.
+4. Back on the report, tap **SAVE RUN** separately to export the processed run JSON and GPX. These are not substitutes for the untouched raw recorder log.
+5. Keep the raw log together with the circuit/layout, session time, weather, tire notes, mount orientation, and any transponder/video reference. Do not edit the log before replay.
+
+### Replay the captured log at a desk
+
+1. Copy the exported raw file temporarily to the served repository root as `trackmaster-raw-sensors.json`; do not commit it.
+2. Start `python3 -m http.server 8000`.
+3. Open `http://localhost:8000/?dev-sensors=replay&replay-log=./trackmaster-raw-sensors.json&dev-rate=0.25`. The slower delivery gives time to pass the permission/calibration screens; use `dev-rate=1` for recorded cadence.
+4. Tap through the normal flow and compare live/report behavior with the saved report, video, or transponder reference. Replay uses the same source seam and estimator pipeline as hardware.
+5. Delete the temporary log when finished. The service worker intentionally does not runtime-cache replay files.
+
+A replay recorded after calibration may begin with a moving sample. If the calibration stability gate cannot establish a zero, preserve the log for estimator-level analysis rather than treating **CONTINUE WITHOUT LEAN** as a valid lean replay.
 
 ## Lean estimation
 
@@ -40,31 +121,50 @@ Ending a race freezes a detached report snapshot from that ended session's monot
 
 `RUN n` is an in-memory counter and resets on reload. `NEW RUN` confirms before discarding an unexported report. `SAVE RUN` passes the latest report through the single stateless `RunStore.save(report)` seam, sharing complete versioned JSON and GPX when supported and otherwise downloading them; runs without location data export JSON alone. The report model reserves nullable `runId` and `riderId`. The track column auto-fits the recorded GPS trace without map tiles, colors it by speed or signed lean, and marks the retained top-speed point.
 
-## Deploy with GitHub Pages
+## First real track-day validation checklist
 
-GitHub Pages provides the HTTPS origin required by iPhone sensor permissions.
+Do not diagnose the display while riding. Use only interactions permitted by the circuit organizer, keep attention on the track, and review readings after stopping.
 
-1. Push these files to the branch that should be published (normally the repository's default branch).
-2. On GitHub, open **Settings → Pages**.
-3. Under **Build and deployment**, choose **Deploy from a branch**.
-4. Select the published branch and **`/(root)`**, then choose **Save**.
-5. Wait for the Pages deployment to finish. GitHub shows the public URL on the same settings page. For this repository it is expected to be `https://ribeck18.github.io/TrackMaster/`.
-6. Open that HTTPS URL in Safari on the iPhone. The first screen should read **ENABLE SENSORS**.
+### Before leaving home
 
-Pages is repository configuration and cannot be enabled by application code. Public repositories can use Pages on GitHub Free; private-repository availability depends on the account plan.
+- [ ] Confirm Pages reports a successful deployment from the intended branch and the exact `/TrackMaster/` URL loads.
+- [ ] Install/update Apex online and pass the complete cold-offline test above twice.
+- [ ] Confirm the recorder URL with `?dev-recorder=1` is open and preserve these capture instructions offline.
+- [ ] Verify iOS Motion, Location, Precise Location, Files/AirDrop export, battery charge, charging lead, and enough free device storage.
+- [ ] Lock the phone in a rigid mount; note its landscape direction and ensure no control, cable, or case can shift it.
+- [ ] Arrange an independent reference where possible: official transponder lap times, camera footage, dashboard speed, and known track direction.
 
-### iPhone shell check
+### In the paddock and on the sighting lap
 
-- Open the Pages URL in portrait. The app should rotate its own canvas into a usable landscape layout even if iOS Rotation Lock is enabled.
-- Confirm that the Rotation Lock hint is visible but does not block the button.
-- Turn the phone physically landscape. The app should use native landscape without the hint.
-- Confirm that content stays clear of the notch/Dynamic Island on either landscape edge.
-- Tap **ENABLE SENSORS**, grant or decline each permission, and confirm the live spirit level or documented degraded state before tapping **ZERO NOW**.
+- [ ] With the bike fully upright and stationary, enable sensors and wait for **READY TO ZERO** before tapping **ZERO NOW**.
+- [ ] Confirm upright lean settles near `0°`. Re-zero after any mount movement.
+- [ ] Outdoors, distinguish `GPS · NO FIX`/`--` from a valid stationary `0 MPH`; do not start the validation session until fixes arrive.
+- [ ] Confirm native landscape, safe-area clearance, readable contrast, and that the screen remains awake during Race.
+- [ ] On a safe straight, compare speed trend with the bike/dashboard or video reference; review exact values later.
+- [ ] Make deliberate lap taps and compare untrimmed times with the transponder. Use report trim only to correct tap timing (±0.5 s boundary model).
 
-## Deployment-safe paths
+### After stopping
 
-All repository-owned assets use document-relative paths (`./css/...`, `./js/...`). Keep future assets and service-worker registration relative as well: GitHub Pages serves this project below `/TrackMaster/`, not at the domain root.
+- [ ] End the race, verify every completed lap appears, total time is conserved during trim, and best-lap highlighting is credible.
+- [ ] Confirm max/average speed, left/right max lean, track shape, top-speed point, and its lap/time context are plausible. Toggle the map between speed and lean coloring.
+- [ ] Save the automatic raw recorder log first, then **SAVE RUN** for JSON/GPX. Confirm the files exist in Files/AirDrop before starting a new run or closing/reloading.
+- [ ] Repeat a short session with cellular and Wi-Fi disabled, including report and export, to confirm actual circuit offline behavior.
+- [ ] Record any sensor dropout, delayed GPS fix, wake-lock failure, share-sheet failure, thermal dimming, mount movement, or unexpected reload with its approximate lap/time.
 
-## Current scope
+### Lean-estimator warning signs that require recorder-backed retuning
 
-The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready renders smoothed live GPS speed in MPH, and Ready and Race render the same fused lean and speed sources. Race records timestamped position/speed/lean instrument samples at up to 20 Hz while retaining accepted native GPS fixes between instrument ticks; duplicate GPS bursts are coalesced. It marks laps from full-screen taps, keeps the display awake, and renders the completed immutable summary in the dense Report layout. Track plotting, JSON/GPX run export, offline installation, and persistence remain separate later issues.
+- [ ] Lean decays materially toward `0°` through a steady-radius sustained corner.
+- [ ] Left/right is reversed, or comparable left and right corners show a persistent unexplained asymmetry.
+- [ ] Hard upright acceleration or braking produces a large false lean spike (cross-axis/forward-axis contamination).
+- [ ] Straight upright sections drift away from `0°`, fail to recover, or oscillate despite a rigid mount.
+- [ ] Tip-in response is consistently late, severely overshoots, or disagrees with video/reference timing.
+- [ ] Output repeatedly clamps near `60°`, jumps discontinuously, or becomes `N/A` while motion delivery is otherwise present.
+- [ ] Repeated sessions on the same corners disagree substantially without a mount, line, or speed change.
+
+One anomalous corner is not enough to tune constants: bumps, camber, rider line, GPS cadence, mount flex, and tire slip are physical confounders. Retune only against exported raw logs plus independent context, then replay all captured sessions to check for regressions.
+
+## What automation proves—and what it cannot
+
+`npm test` statically verifies relative PWA metadata and runtime assets and deterministically executes service-worker install, activate, fetch, failure, cleanup, navigation, and update behavior. It also preserves the existing sensor, timing, report, trim, map, and export test suite. Syntax/JSON/PNG checks verify deployable file structure.
+
+Automation cannot enable GitHub Pages, add an icon to a physical iPhone, prove iOS standalone chrome behavior, reproduce Safari storage eviction, grant/recover real permissions, obtain a satellite fix without data, measure device sensor cadence, validate Wake Lock/thermal behavior, exercise every share-sheet destination, or establish true motorcycle lean on track. The cold-offline and first-track-day checklists are therefore release gates, not claims already proven by unit tests.
