@@ -255,7 +255,7 @@ test("registration keeps script and scope relative beneath /TrackMaster and forc
 
 test("service worker uses a build stamp and serves cold cached navigation and assets", async () => {
   const source = await text("sw.js");
-  assert.match(source, /const BUILD_STAMP = "\d{8}-issue12";/);
+  assert.match(source, /const BUILD_STAMP = "\d{8}-issue\d+(?:-[a-z0-9-]+)?";/);
   assert.match(source, /const CACHE_NAME = `\$\{CACHE_PREFIX\}\$\{BUILD_STAMP\}`;/);
 
   const harness = createServiceWorkerHarness();
@@ -288,7 +288,7 @@ test("activation removes only stale Apex builds and claims existing installs", a
   await harness.lifecycle("activate");
 
   const names = await harness.caches.keys();
-  assert.ok(names.includes("apex-lap-tracker-20260802-issue12"));
+  assert.ok(names.includes("apex-lap-tracker-20260802-issue3-replay-init"));
   assert.ok(!names.includes("apex-lap-tracker-20260731-old"));
   assert.ok(names.includes("other-application-cache"));
   assert.equal(harness.claimCalls, 1);

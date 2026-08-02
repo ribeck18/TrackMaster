@@ -309,7 +309,7 @@ test("simulator and replay location samples use the same speedometer seam", asyn
     createRawSensorLog([
       fix({ timestamp: 0, longitude: 0 }),
       fix({ timestamp: 10_000, longitude: 0.001 }),
-    ]),
+    ], { version: 1 }),
     replayTimers,
   );
   const replayedSpeed = createGpsSpeedometer({ smoothingFactor: 1 });

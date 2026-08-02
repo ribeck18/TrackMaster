@@ -6,6 +6,9 @@ export const DEV_SENSOR_PARAMETER = "dev-sensors";
 export function readDevSensorOptions(search = "") {
   const parameters = new URLSearchParams(search);
   const mode = parameters.get(DEV_SENSOR_PARAMETER);
+  if (parameters.get("dev-recorder") === "1" && (mode === "simulator" || mode === "replay")) {
+    throw new Error("dev-recorder=1 supports real hardware only and cannot be combined with dev-sensors.");
+  }
   if (mode !== "simulator" && mode !== "replay") {
     return Object.freeze({ mode: null, playbackRate: 1, replayLogUrl: null });
   }
@@ -51,5 +54,6 @@ export async function selectSensorSource({
 }
 
 export function isRawRecorderExportEnabled(search = "") {
+  readDevSensorOptions(search);
   return new URLSearchParams(search).get("dev-recorder") === "1";
 }

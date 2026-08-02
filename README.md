@@ -86,8 +86,10 @@ Airplane Mode can affect Assisted GPS time-to-first-fix, so `GPS · NO FIX` may 
 Developer sources are selected only by URL parameters; there is no rider-facing switch and no application persistence.
 
 - `?dev-sensors=simulator` replaces hardware with a deterministic 38-second session. It begins with a stable calibration interval, then includes low-speed (under 15 mph) manoeuvring, physically matched constant-radius corners in both directions, an 85-to-12 mph upright braking event, and gradual acceleration/finish sections. Its source readings include gravity, normalized three-axis body gyro rate, and orientation alongside GPS. Add `&dev-rate=4` to deliver it four times faster.
-- `?dev-sensors=replay&replay-log=./trackmaster-raw-sensors.json` fetches a raw log and replays its untouched values and timestamps. `dev-rate` changes delivery timing only.
-- `?dev-recorder=1` keeps real hardware selected and records untouched source readings during Race. **END RACE** exports the in-memory raw JSON log automatically.
+- `?dev-sensors=replay&replay-log=./trackmaster-raw-sensors.json` fetches a raw log and replays its untouched values and timestamps. Current v2 logs also restore the explicit initialization action—recorded calibration or continue without lean—and untouched pre/post-action readings before Race sample 1 is released. `dev-rate` changes delivery timing only.
+- `?dev-recorder=1` keeps real hardware selected, emits a v2 log with the accepted calibration or explicit continue-without-lean action, captures untouched access-to-Race initialization readings, and records untouched source readings during Race. **END RACE** exports the in-memory raw JSON log automatically.
+
+`dev-recorder=1` is real-hardware-only and must not be combined with `dev-sensors=simulator` or `dev-sensors=replay`; Apex rejects those ambiguous URLs. Simulator and replay remain standalone source modes. The loader retains legacy v1 play-on-access behavior, while every newly recorded v2 log requires initialization/action metadata and uses gated playback.
 
 Recording uses RAM only. Export uses the Web Share API or an in-memory Blob download and never writes to localStorage, IndexedDB, or another application store. The log loader accepts JSON text, `Blob`/`File`, or a parsed log object.
 
@@ -103,11 +105,10 @@ Recording uses RAM only. Export uses the Web Share API or an in-memory Blob down
 
 1. Copy the exported raw file temporarily to the served repository root as `trackmaster-raw-sensors.json`; do not commit it.
 2. Start `python3 -m http.server 8000`.
-3. Open `http://localhost:8000/?dev-sensors=replay&replay-log=./trackmaster-raw-sensors.json&dev-rate=0.25`. The slower delivery gives time to pass the permission/calibration screens; use `dev-rate=1` for recorded cadence.
-4. Tap through the normal flow and compare live/report behavior with the saved report, video, or transponder reference. Replay uses the same source seam and estimator pipeline as hardware.
-5. Delete the temporary log when finished. The service worker intentionally does not runtime-cache replay files.
-
-A replay recorded after calibration may begin with a moving sample. If the calibration stability gate cannot establish a zero, preserve the log for estimator-level analysis rather than treating **CONTINUE WITHOUT LEAN** as a valid lean replay.
+3. Open `http://localhost:8000/?dev-sensors=replay&replay-log=./trackmaster-raw-sensors.json&dev-rate=1`. Use another positive `dev-rate` to scale both recorded initialization and Race delivery timing.
+4. Tap **ENABLE SENSORS**, then perform the action shown: **LOAD RECORDED ZERO** for a calibrated run or **CONTINUE WITHOUT LEAN** for a degraded run. On Ready, tap to start Race. Apex first rebuilds the recorded post-action estimator state, then releases Race sample 1; no Race samples run ahead while the UI is on Enable, Calibrate, or Ready.
+5. Let the replay finish, end the race, and compare live/report behavior with the saved report, video, or transponder reference. Replay uses the same source seam, GPS speed processing, and lean-estimator pipeline as hardware.
+6. Delete the temporary log when finished. The service worker intentionally does not runtime-cache replay files.
 
 ## Lean estimation
 

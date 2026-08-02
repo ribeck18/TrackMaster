@@ -1,5 +1,9 @@
 import { cloneJsonValue } from "./json-value.js";
-import { createRawSensorLog, serializeRawSensorLog } from "./raw-sensor-log.js";
+import {
+  createRawSensorLog,
+  REPLAY_INITIALIZATION_ACTION,
+  serializeRawSensorLog,
+} from "./raw-sensor-log.js";
 
 /**
  * Records directly at the unified source seam, before any subscriber can
@@ -18,13 +22,32 @@ export function createRawSensorRecorder(source, {
   let recordingStartedAt = 0;
   let recording = false;
   let destroyed = false;
+  let replayAction = null;
+  let actionSampleCount = null;
+  let initializationSamples = [];
+  let initializationDeliveryOffsetsMs = [];
+  let initializationStartedAt = nowRef();
+  let recordingReplayInitialization = undefined;
+
+  function appendReading(targetSamples, targetOffsets, sample, startedAt, label) {
+    if (!Number.isFinite(sample?.timestamp)) return;
+    targetSamples.push(cloneJsonValue(sample, label));
+    const measuredOffset = Math.max(0, nowRef() - startedAt);
+    targetOffsets.push(Math.max(targetOffsets.at(-1) ?? 0, measuredOffset));
+  }
 
   const unsubscribeSource = source.subscribe((sample) => {
     if (destroyed) return;
-    if (recording && Number.isFinite(sample?.timestamp)) {
-      samples.push(cloneJsonValue(sample, "Raw sensor reading"));
-      const measuredOffset = Math.max(0, nowRef() - recordingStartedAt);
-      deliveryOffsetsMs.push(Math.max(deliveryOffsetsMs.at(-1) ?? 0, measuredOffset));
+    if (recording) {
+      appendReading(samples, deliveryOffsetsMs, sample, recordingStartedAt, "Raw sensor reading");
+    } else {
+      appendReading(
+        initializationSamples,
+        initializationDeliveryOffsetsMs,
+        sample,
+        initializationStartedAt,
+        "Replay initialization reading",
+      );
     }
     for (const subscriber of subscribers) subscriber(sample);
   });
@@ -41,21 +64,78 @@ export function createRawSensorRecorder(source, {
     return () => subscribers.delete(subscriber);
   }
 
+  function setReplayAction(action) {
+    if (destroyed) throw new Error("Cannot initialize a destroyed sensor source.");
+    if (recording) throw new Error("Replay initialization must be captured before recording starts.");
+    replayAction = action;
+    actionSampleCount = initializationSamples.length;
+    recordingReplayInitialization = undefined;
+  }
+
+  function setReplayCalibration(gravity) {
+    if (!gravity || ![gravity.x, gravity.y, gravity.z].every(Number.isFinite)) {
+      throw new TypeError("Replay calibration requires finite gravity x, y, and z components.");
+    }
+    setReplayAction({
+      type: REPLAY_INITIALIZATION_ACTION.CALIBRATE,
+      gravity: { x: gravity.x, y: gravity.y, z: gravity.z },
+    });
+  }
+
+  function setReplayWithoutLean() {
+    setReplayAction({ type: REPLAY_INITIALIZATION_ACTION.CONTINUE_WITHOUT_LEAN });
+  }
+
+  function replayInitialization() {
+    if (!replayAction) return undefined;
+    return {
+      action: replayAction,
+      actionSampleCount,
+      samples: initializationSamples,
+      deliveryOffsetsMs: initializationDeliveryOffsetsMs,
+    };
+  }
+
   function startRecording() {
     if (destroyed) throw new Error("Cannot record from a destroyed sensor source.");
+    if (!replayAction) {
+      throw new Error("A replay initialization action is required before recording starts.");
+    }
     samples = [];
     deliveryOffsetsMs = [];
+    recordingReplayInitialization = replayInitialization();
     recordingStartedAt = nowRef();
     recording = true;
   }
 
   function stopRecording() {
     recording = false;
-    return createRawSensorLog(samples, { deliveryOffsetsMs });
+    const log = createRawSensorLog(samples, {
+      deliveryOffsetsMs,
+      replayInitialization: recordingReplayInitialization,
+    });
+
+    // The live estimator keeps consuming sensors between runs. Retain the
+    // completed race in the next run's initialization history so a later run
+    // from Ready can rebuild the same continuous in-memory estimator state.
+    if (replayAction) {
+      const raceStartOffset = Math.max(
+        initializationDeliveryOffsetsMs.at(-1) ?? 0,
+        recordingStartedAt - initializationStartedAt,
+      );
+      initializationSamples.push(...samples.map((sample) => cloneJsonValue(sample, "Replay history reading")));
+      initializationDeliveryOffsetsMs.push(
+        ...deliveryOffsetsMs.map((offset) => raceStartOffset + offset),
+      );
+    }
+    return log;
   }
 
   function getRecording() {
-    return createRawSensorLog(samples, { deliveryOffsetsMs });
+    return createRawSensorLog(samples, {
+      deliveryOffsetsMs,
+      replayInitialization: recordingReplayInitialization ?? replayInitialization(),
+    });
   }
 
   function destroy() {
@@ -71,6 +151,8 @@ export function createRawSensorRecorder(source, {
     requestAccess,
     subscribe,
     destroy,
+    setReplayCalibration,
+    setReplayWithoutLean,
     startRecording,
     stopRecording,
     getRecording,

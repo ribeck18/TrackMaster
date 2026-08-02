@@ -17,6 +17,7 @@ import {
   formatLapTime,
   startLapTiming,
 } from "./core/lap-timing.js";
+import { REPLAY_INITIALIZATION_ACTION } from "./core/raw-sensor-log.js";
 import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js";
 import {
   adjustLapBoundaryIfAllowed,
@@ -61,6 +62,7 @@ const selectedSensorSource = await selectSensorSource({
 const exportRawRecording = isRawRecorderExportEnabled(window.location.search);
 const rawRecorder = exportRawRecording ? createRawSensorRecorder(selectedSensorSource) : null;
 const sensorSource = rawRecorder ?? selectedSensorSource;
+const replayInitialization = sensorSource.getReplayInitialization?.() ?? null;
 const spiritLevel = document.querySelector("[data-spirit-level]");
 const bubble = spiritLevel.querySelector(".level__bubble");
 const unavailableLevel = spiritLevel.querySelector(".level__unavailable");
@@ -99,6 +101,8 @@ let completedSession = null;
 let raceTimer = null;
 let lastLapActivationAt = Number.NEGATIVE_INFINITY;
 let runCount = 0;
+let replayCalibrationInitializing = false;
+let replayRaceStarting = false;
 
 const MINIMUM_LAP_ACTIVATION_INTERVAL_MS = 500;
 
@@ -158,6 +162,23 @@ function updateSpiritLevel(sample) {
 }
 
 function updateCalibrationUi() {
+  if (replayInitialization) {
+    const withoutLean =
+      replayInitialization.action.type === REPLAY_INITIALIZATION_ACTION.CONTINUE_WITHOUT_LEAN;
+    zeroButton.disabled = replayCalibrationInitializing;
+    zeroButton.textContent = replayCalibrationInitializing
+      ? "INITIALIZING…"
+      : withoutLean
+        ? "CONTINUE WITHOUT LEAN"
+        : "LOAD RECORDED ZERO";
+    calibrationStatus.textContent = replayCalibrationInitializing
+      ? "REPLAYING RECORDED PRE-ACTION STATE"
+      : withoutLean
+        ? "RECORDED NO-LEAN ACTION READY"
+        : "RECORDED CALIBRATION READY";
+    calibrationStatus.dataset.ready = String(!replayCalibrationInitializing);
+    return;
+  }
   const outcome = accessOutcomeState.getCurrent()?.motion;
   if (outcome?.status !== SENSOR_STATUS.GRANTED) return;
   const now = monotonicNow();
@@ -374,9 +395,34 @@ enableButton.addEventListener("click", async () => {
   }
 });
 
-zeroButton.addEventListener("click", () => {
+zeroButton.addEventListener("click", async () => {
   const motionAvailable =
     accessOutcomeState.getCurrent()?.motion.status === SENSOR_STATUS.GRANTED;
+  if (replayInitialization) {
+    replayCalibrationInitializing = true;
+    updateCalibrationUi();
+    try {
+      // Prime the same GPS/source state that existed when the recorded action
+      // ran, then deterministically apply calibration or continue without lean.
+      await sensorSource.initializeAction();
+      if (replayInitialization.action.type === REPLAY_INITIALIZATION_ACTION.CALIBRATE) {
+        leanEstimator.calibrate(replayInitialization.action.gravity);
+        readyLeanGauge.render(0);
+      } else {
+        readyLeanGauge.render(Number.NaN);
+      }
+      replayCalibrationInitializing = false;
+      dispatch("ZERO");
+    } catch (error) {
+      replayCalibrationInitializing = false;
+      console.error("Replay initialization action failed.", error);
+      zeroButton.disabled = false;
+      updateCalibrationUi();
+      calibrationStatus.textContent = "REPLAY INITIALIZATION FAILED";
+      calibrationStatus.dataset.ready = "false";
+    }
+    return;
+  }
   if (motionAvailable) {
     const now = monotonicNow();
     const readiness = calibrationWindow.snapshot(now);
@@ -386,6 +432,7 @@ zeroButton.addEventListener("click", () => {
         now - motionGrantedAt > 1_000 &&
         !isGyroDeliveryFresh(lastGyroReceivedAt, now);
       if (gyroTimedOut) {
+        rawRecorder?.setReplayWithoutLean();
         readyLeanGauge.render(Number.NaN);
         dispatch("ZERO");
         return;
@@ -395,6 +442,7 @@ zeroButton.addEventListener("click", () => {
     }
     try {
       leanEstimator.calibrate(readiness.gravity);
+      rawRecorder?.setReplayCalibration(readiness.gravity);
       readyLeanGauge.render(0);
     } catch (error) {
       console.error("Bike-frame calibration failed.", error);
@@ -403,6 +451,7 @@ zeroButton.addEventListener("click", () => {
       return;
     }
   } else {
+    rawRecorder?.setReplayWithoutLean();
     readyLeanGauge.render(Number.NaN);
   }
   dispatch("ZERO");
@@ -434,8 +483,22 @@ function acceptLapActivation(now) {
   return true;
 }
 
-document.querySelector('[data-action="start-race"]').addEventListener("click", () => {
-  if (currentState !== "ready") return;
+document.querySelector('[data-action="start-race"]').addEventListener("click", async () => {
+  if (currentState !== "ready" || replayRaceStarting) return;
+  if (replayInitialization) {
+    replayRaceStarting = true;
+    try {
+      // Rebuild the exact post-action estimator state immediately before Race so
+      // user dwell time on Ready cannot make replayed GPS/gyro state stale.
+      await sensorSource.initializeReplay();
+    } catch (error) {
+      console.error("Replay initialization failed.", error);
+      replayRaceStarting = false;
+      return;
+    }
+    replayRaceStarting = false;
+    if (currentState !== "ready") return;
+  }
   const now = monotonicNow();
   lastLapActivationAt = now;
   raceTiming = startLapTiming(now);
@@ -449,6 +512,7 @@ document.querySelector('[data-action="start-race"]').addEventListener("click", (
   sessionRecorder.record(liveSessionReading(now), now, { force: true });
   rawRecorder?.startRecording();
   dispatch("START_RACE");
+  sensorSource.startReplay?.();
   startRaceTimer();
   void raceWakeLock.start();
 });

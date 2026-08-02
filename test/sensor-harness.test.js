@@ -2,9 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import { createGpsSpeedometer } from "../js/core/gps-speed.js";
+import { createLeanEstimator } from "../js/core/lean-estimator.js";
 import {
   createRawSensorLog,
   loadRawSensorLog,
+  RAW_SENSOR_LOG_LEGACY_VERSION,
+  RAW_SENSOR_LOG_VERSION,
+  REPLAY_INITIALIZATION_ACTION,
   serializeRawSensorLog,
 } from "../js/core/raw-sensor-log.js";
 import {
@@ -13,6 +18,7 @@ import {
   exportRawSensorLog,
 } from "../js/core/recorder.js";
 import {
+  isRawRecorderExportEnabled,
   readDevSensorOptions,
   selectSensorSource,
 } from "../js/dev/dev-sensor-source.js";
@@ -62,6 +68,13 @@ function manualTimers() {
     },
     cleared,
   };
+}
+
+function createLegacyRawSensorLog(samples, options = {}) {
+  return createRawSensorLog(samples, {
+    ...options,
+    version: RAW_SENSOR_LOG_LEGACY_VERSION,
+  });
 }
 
 function samplesInRange(samples, range, type) {
@@ -217,6 +230,8 @@ test("the simulator implements the normalized source seam with explicit body-rat
 test("recorder captures timestamped samples before downstream mutation and ignores access events", () => {
   const source = fakeSource();
   const recorder = createRawSensorRecorder(source);
+  assert.throws(() => recorder.startRecording(), /initialization action is required/);
+  recorder.setReplayWithoutLean();
   recorder.startRecording();
   recorder.subscribe((sample) => {
     if (sample.type === "orientation") sample.gamma = 999;
@@ -242,6 +257,7 @@ test("nested raw values are defensively cloned at recorder, log, and timed-sourc
   const source = fakeSource();
   let now = 0;
   const recorder = createRawSensorRecorder(source, { nowRef: () => now });
+  recorder.setReplayWithoutLean();
   recorder.startRecording();
   recorder.subscribe((sample) => {
     sample.motion.rotationRate.alpha = 999;
@@ -266,7 +282,7 @@ test("nested raw values are defensively cloned at recorder, log, and timed-sourc
   assert.equal(freshLog.samples[0].motion.axes[0].value, 5);
 
   const logInput = [{ type: "orientation", timestamp: 20, nested: { values: [1, { value: 2 }] } }];
-  const ownedLog = createRawSensorLog(logInput);
+  const ownedLog = createLegacyRawSensorLog(logInput);
   logInput[0].nested.values[1].value = 333;
   assert.equal(ownedLog.samples[0].nested.values[1].value, 2);
 
@@ -283,8 +299,268 @@ test("nested raw values are defensively cloned at recorder, log, and timed-sourc
   assert.equal(ownedLog.samples[0].nested.values[1].value, 2);
 });
 
+test("record/export/load/replay restores calibration and pre-race estimator state without losing samples", async () => {
+  const source = fakeSource();
+  let now = 0;
+  const recorder = createRawSensorRecorder(source, { nowRef: () => now });
+  const gravity = { x: 0, y: 0, z: 9.80665 };
+  const preCalibrationSamples = [
+    {
+      type: "location",
+      timestamp: 50,
+      latitude: 37,
+      longitude: -122,
+      accuracy: 3,
+      speed: 20,
+      heading: 0,
+    },
+  ];
+  const initializationSamples = [
+    {
+      type: "motion",
+      timestamp: 60,
+      accelerationIncludingGravity: gravity,
+      rotationRate: { x: 0, y: 0, z: 0 },
+    },
+  ];
+  const raceSamples = [
+    {
+      type: "motion",
+      timestamp: 100,
+      accelerationIncludingGravity: gravity,
+      rotationRate: { x: 0, y: 20, z: 0 },
+    },
+    {
+      type: "motion",
+      timestamp: 200,
+      accelerationIncludingGravity: gravity,
+      rotationRate: { x: 0, y: 20, z: -8 },
+    },
+    {
+      type: "location",
+      timestamp: 250,
+      latitude: 37.0001,
+      longitude: -122,
+      accuracy: 3,
+      speed: 20,
+      heading: 2,
+    },
+    {
+      type: "motion",
+      timestamp: 300,
+      accelerationIncludingGravity: gravity,
+      rotationRate: { x: 0, y: 0, z: -8 },
+    },
+  ];
+
+  function estimatorPipeline() {
+    const speedometer = createGpsSpeedometer();
+    const estimator = createLeanEstimator({ nowRef: () => 0 });
+    const readings = [];
+    return {
+      estimator,
+      readings,
+      handle(sample) {
+        if (sample.type === "location") {
+          speedometer.handle(sample);
+          estimator.update(speedometer.kinematicSample());
+        } else {
+          speedometer.handle(sample);
+          estimator.update(sample);
+        }
+        readings.push({
+          type: sample.type,
+          timestamp: sample.timestamp,
+          speed: speedometer.snapshot(),
+          lean: estimator.snapshot(),
+        });
+      },
+    };
+  }
+
+  const live = estimatorPipeline();
+  recorder.subscribe((sample) => live.handle(sample));
+  for (const [index, sample] of preCalibrationSamples.entries()) {
+    now = index * 50;
+    source.emit(sample);
+  }
+  live.estimator.calibrate(gravity);
+  recorder.setReplayCalibration(gravity);
+  for (const [index, sample] of initializationSamples.entries()) {
+    now = 50 + index * 50;
+    source.emit(sample);
+  }
+  const liveRaceStart = live.estimator.snapshot();
+  now = 100;
+  recorder.startRecording();
+  for (const [index, sample] of raceSamples.entries()) {
+    now = 100 + index * 50;
+    source.emit(sample);
+  }
+  const liveRaceReadings = live.readings.slice(
+    preCalibrationSamples.length + initializationSamples.length,
+  );
+  const exportedFile = createRawSensorLogFile(recorder.stopRecording(), {
+    FileRef: undefined,
+    BlobRef: Blob,
+  });
+  const loaded = await loadRawSensorLog(exportedFile);
+
+  assert.equal(loaded.version, RAW_SENSOR_LOG_VERSION);
+  assert.deepEqual(loaded.replayInitialization.action, {
+    type: REPLAY_INITIALIZATION_ACTION.CALIBRATE,
+    gravity,
+  });
+  assert.equal(loaded.replayInitialization.actionSampleCount, preCalibrationSamples.length);
+  assert.deepEqual(
+    loaded.replayInitialization.samples,
+    [...preCalibrationSamples, ...initializationSamples],
+  );
+  assert.deepEqual(loaded.samples, raceSamples);
+
+  async function replayOnce() {
+    const timers = manualTimers();
+    const replay = createReplaySensorSource(loaded, timers);
+    const pipeline = estimatorPipeline();
+    const emitted = [];
+    replay.subscribe((sample) => {
+      emitted.push(sample);
+      pipeline.handle(sample);
+    });
+
+    await replay.requestAccess();
+    assert.deepEqual(emitted, [], "sensor access does not consume initialization or race samples");
+    const actionReady = replay.initializeAction();
+    timers.drain();
+    await actionReady;
+    assert.deepEqual(emitted, preCalibrationSamples);
+    pipeline.estimator.calibrate(replay.getReplayInitialization().action.gravity);
+    const initializationDone = replay.initializeReplay();
+    timers.drain();
+    await initializationDone;
+    assert.deepEqual(
+      emitted,
+      [...preCalibrationSamples, ...initializationSamples],
+      "race samples stay gated until the app enters Race",
+    );
+    assert.deepEqual(pipeline.estimator.snapshot(), liveRaceStart);
+
+    replay.startReplay();
+    timers.drain();
+    assert.deepEqual(
+      emitted,
+      [...preCalibrationSamples, ...initializationSamples, ...raceSamples],
+    );
+    return pipeline.readings.slice(preCalibrationSamples.length + initializationSamples.length);
+  }
+
+  const firstReplay = await replayOnce();
+  const secondReplay = await replayOnce();
+  assert.deepEqual(firstReplay, liveRaceReadings);
+  assert.deepEqual(secondReplay, firstReplay);
+
+  const mainSource = await readFile(new URL("../js/main.js", import.meta.url), "utf8");
+  const initializeAt = mainSource.indexOf("await sensorSource.initializeReplay()");
+  const sessionStartAt = mainSource.indexOf("sessionRecorder.start(now)", initializeAt);
+  const releaseRaceAt = mainSource.indexOf("sensorSource.startReplay?.()", sessionStartAt);
+  assert.ok(initializeAt >= 0 && initializeAt < sessionStartAt);
+  assert.ok(sessionStartAt < releaseRaceAt, "the app records before Race sample 1 is released");
+  assert.match(mainSource, /leanEstimator\.calibrate\(replayInitialization\.action\.gravity\)/);
+});
+
+test("degraded GPS-only, no-sensor, and gyro-stall recordings emit gated v2 no-lean replays", async () => {
+  const scenarios = [
+    {
+      name: "motion denied GPS-only",
+      preAction: [{
+        type: "location",
+        timestamp: 10,
+        latitude: 37,
+        longitude: -122,
+        speed: 0,
+      }],
+      postAction: [{
+        type: "location",
+        timestamp: 20,
+        latitude: 37.00001,
+        longitude: -122,
+        speed: 5,
+      }],
+      race: [{
+        type: "location",
+        timestamp: 30,
+        latitude: 37.00002,
+        longitude: -122,
+        speed: 10,
+      }],
+    },
+    {
+      name: "granted motion with stalled gyro",
+      preAction: [{ type: "orientation", timestamp: 100, alpha: 0, beta: 0, gamma: 0 }],
+      postAction: [{ type: "orientation", timestamp: 110, alpha: 0, beta: 0, gamma: 0 }],
+      race: [{ type: "location", timestamp: 120, latitude: 37, longitude: -122, speed: 12 }],
+    },
+    {
+      name: "motion and location unavailable",
+      preAction: [],
+      postAction: [],
+      race: [],
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const source = fakeSource();
+    let now = 0;
+    const recorder = createRawSensorRecorder(source, { nowRef: () => now });
+    for (const sample of scenario.preAction) {
+      now += 10;
+      source.emit(sample);
+    }
+    recorder.setReplayWithoutLean();
+    for (const sample of scenario.postAction) {
+      now += 10;
+      source.emit(sample);
+    }
+    recorder.startRecording();
+    for (const sample of scenario.race) {
+      now += 10;
+      source.emit(sample);
+    }
+    const loaded = await loadRawSensorLog(serializeRawSensorLog(recorder.stopRecording()));
+    assert.equal(loaded.version, RAW_SENSOR_LOG_VERSION, scenario.name);
+    assert.deepEqual(loaded.replayInitialization.action, {
+      type: REPLAY_INITIALIZATION_ACTION.CONTINUE_WITHOUT_LEAN,
+    });
+    assert.equal(loaded.replayInitialization.actionSampleCount, scenario.preAction.length);
+
+    const timers = manualTimers();
+    const replay = createReplaySensorSource(loaded, timers);
+    const emitted = [];
+    replay.subscribe((sample) => emitted.push(sample));
+    await replay.requestAccess();
+    assert.deepEqual(emitted, [], `${scenario.name}: access remains gated`);
+    const actionReady = replay.initializeAction();
+    timers.drain();
+    await actionReady;
+    assert.deepEqual(emitted, scenario.preAction);
+    const initialized = replay.initializeReplay();
+    timers.drain();
+    await initialized;
+    assert.deepEqual(emitted, [...scenario.preAction, ...scenario.postAction]);
+    replay.startReplay();
+    timers.drain();
+    assert.deepEqual(emitted, [...scenario.preAction, ...scenario.postAction, ...scenario.race]);
+  }
+
+  const mainSource = await readFile(new URL("../js/main.js", import.meta.url), "utf8");
+  assert.ok(
+    mainSource.match(/rawRecorder\?\.setReplayWithoutLean\(\)/g)?.length >= 2,
+    "both unavailable motion and gyro-timeout actions are recorded",
+  );
+});
+
 test("raw log export creates a loadable in-memory JSON file", async () => {
-  const log = createRawSensorLog([{ type: "orientation", timestamp: 1, gamma: 2 }]);
+  const log = createLegacyRawSensorLog([{ type: "orientation", timestamp: 1, gamma: 2 }]);
   const file = createRawSensorLogFile(log, { FileRef: undefined, BlobRef: Blob });
   assert.equal(file.name, "trackmaster-raw-sensors.json");
   assert.equal(file.type, "application/json");
@@ -293,7 +569,7 @@ test("raw log export creates a loadable in-memory JSON file", async () => {
 });
 
 test("export uses the share sheet without touching browser persistence", async () => {
-  const log = createRawSensorLog([{ type: "location", timestamp: 1, speed: 4 }]);
+  const log = createLegacyRawSensorLog([{ type: "location", timestamp: 1, speed: 4 }]);
   const shared = [];
   const file = await exportRawSensorLog(log, {
     navigatorRef: {
@@ -311,7 +587,7 @@ test("export uses the share sheet without touching browser persistence", async (
 });
 
 test("Blob download fallback revokes its transient object URL", async () => {
-  const log = createRawSensorLog([{ type: "orientation", timestamp: 1, gamma: 2 }]);
+  const log = createLegacyRawSensorLog([{ type: "orientation", timestamp: 1, gamma: 2 }]);
   const calls = [];
   const anchor = {
     click: () => calls.push("click"),
@@ -336,7 +612,7 @@ test("Blob download fallback revokes its transient object URL", async () => {
 });
 
 test("Blob download fallback cleans up when anchor setup or click throws", async () => {
-  const log = createRawSensorLog([{ type: "orientation", timestamp: 1, gamma: 2 }]);
+  const log = createLegacyRawSensorLog([{ type: "orientation", timestamp: 1, gamma: 2 }]);
 
   for (const failurePoint of ["setup", "click"]) {
     const calls = [];
@@ -387,7 +663,7 @@ test("playback rate scales explicit replay delays without changing readings", as
     { type: "location", timestamp: 300, nested: { value: 3 } },
   ];
   const source = createReplaySensorSource(
-    createRawSensorLog(readings, { deliveryOffsetsMs: [0, 200, 500] }),
+    createLegacyRawSensorLog(readings, { deliveryOffsetsMs: [0, 200, 500] }),
     { playbackRate: 2, ...timers },
   );
   const emitted = [];
@@ -398,6 +674,45 @@ test("playback rate scales explicit replay delays without changing readings", as
   assert.equal(timers.runNext(), 100);
   assert.equal(timers.runNext(), 150);
   assert.deepEqual(emitted, readings);
+});
+
+test("destroy rejects pending v2 action and post-action initialization phases without hanging", async () => {
+  function phaseLog(actionSampleCount) {
+    return createRawSensorLog(
+      [{ type: "location", timestamp: 300, latitude: 1, longitude: 2, speed: 3 }],
+      {
+        replayInitialization: {
+          action: { type: REPLAY_INITIALIZATION_ACTION.CONTINUE_WITHOUT_LEAN },
+          actionSampleCount,
+          samples: [
+            { type: "orientation", timestamp: 100 },
+            { type: "orientation", timestamp: 200 },
+          ],
+          deliveryOffsetsMs: [0, 100],
+        },
+      },
+    );
+  }
+
+  const actionTimers = manualTimers();
+  const actionReplay = createReplaySensorSource(phaseLog(2), actionTimers);
+  const actionEmitted = [];
+  actionReplay.subscribe((sample) => actionEmitted.push(sample));
+  const pendingAction = actionReplay.initializeAction();
+  assert.equal(actionTimers.runNext(), 0);
+  actionReplay.destroy();
+  await assert.rejects(pendingAction, /destroyed during initialization/);
+  actionTimers.drain();
+  assert.equal(actionEmitted.length, 1);
+
+  const postTimers = manualTimers();
+  const postReplay = createReplaySensorSource(phaseLog(0), postTimers);
+  await postReplay.initializeAction();
+  const pendingPostAction = postReplay.initializeReplay();
+  assert.equal(postTimers.runNext(), 0);
+  postReplay.destroy();
+  await assert.rejects(pendingPostAction, /destroyed during initialization/);
+  postTimers.drain();
 });
 
 test("destroy cancels the timed source's pending callback", async () => {
@@ -420,7 +735,7 @@ test("destroy cancels the timed source's pending callback", async () => {
 
 test("two replays emit identical readings and preserve original timestamps", async () => {
   const readings = createSyntheticSessionSamples({ durationMs: 34_000 }).slice(0, 20);
-  const log = createRawSensorLog(readings);
+  const log = createLegacyRawSensorLog(readings);
 
   async function replayOnce() {
     const timers = manualTimers();
@@ -442,30 +757,87 @@ test("two replays emit identical readings and preserve original timestamps", asy
   );
 });
 
-test("replay loads exported JSON text and rejects malformed delivery timing", async () => {
-  const log = createRawSensorLog([
+test("raw log validation dispatches valid v1/v2 contracts and rejects malformed v2 metadata", async () => {
+  const legacyLog = createLegacyRawSensorLog([
     { type: "orientation", timestamp: 1, gamma: 2 },
     { type: "location", timestamp: 2, speed: 3 },
   ]);
-  const timers = manualTimers();
-  const source = await loadReplaySensorSource(serializeRawSensorLog(log), { ...timers });
-  const emitted = [];
-  source.subscribe((sample) => emitted.push(sample));
-  await source.requestAccess();
-  timers.drain();
-  assert.deepEqual(emitted, log.samples);
+  assert.equal(legacyLog.version, RAW_SENSOR_LOG_LEGACY_VERSION);
+  assert.equal("replayInitialization" in legacyLog, false);
+  const legacyTimers = manualTimers();
+  const legacySource = await loadReplaySensorSource(serializeRawSensorLog(legacyLog), legacyTimers);
+  const legacyEmitted = [];
+  legacySource.subscribe((sample) => legacyEmitted.push(sample));
+  await legacySource.requestAccess();
+  legacyTimers.drain();
+  assert.deepEqual(legacyEmitted, legacyLog.samples, "v1 retains play-on-access behavior");
+
+  const version2Log = createRawSensorLog(legacyLog.samples, {
+    deliveryOffsetsMs: legacyLog.deliveryOffsetsMs,
+    replayInitialization: {
+      action: { type: REPLAY_INITIALIZATION_ACTION.CONTINUE_WITHOUT_LEAN },
+      actionSampleCount: 0,
+      samples: [],
+      deliveryOffsetsMs: [],
+    },
+  });
+  assert.equal(version2Log.version, RAW_SENSOR_LOG_VERSION);
+  assert.deepEqual(await loadRawSensorLog(serializeRawSensorLog(version2Log)), version2Log);
 
   await assert.rejects(() => loadRawSensorLog("not JSON"), /Invalid raw sensor log JSON/);
   assert.throws(
-    () => createRawSensorLog([{ type: "orientation", timestamp: 1, gamma: undefined }]),
+    () => createLegacyRawSensorLog([{ type: "orientation", timestamp: 1, gamma: undefined }]),
     /JSON cannot preserve/,
   );
   await assert.rejects(
-    () => loadRawSensorLog({ ...log, deliveryOffsetsMs: [2, 1] }),
+    () => loadRawSensorLog({ ...legacyLog, deliveryOffsetsMs: [2, 1] }),
     /ordered/,
   );
+  const version2Base = { ...legacyLog, version: RAW_SENSOR_LOG_VERSION };
+  await assert.rejects(
+    () => loadRawSensorLog(version2Base),
+    /Version 2 raw logs require replay initialization metadata/,
+  );
+  await assert.rejects(
+    () => loadRawSensorLog({ ...version2Base, replayInitialization: {} }),
+    /Replay initialization samples must be an array/,
+  );
+  await assert.rejects(
+    () => loadRawSensorLog({
+      ...version2Base,
+      replayInitialization: {
+        action: { type: REPLAY_INITIALIZATION_ACTION.CALIBRATE },
+        actionSampleCount: 0,
+        samples: [],
+        deliveryOffsetsMs: [],
+      },
+    }),
+    /Replay calibration action must contain finite gravity/,
+  );
+  await assert.rejects(
+    () => loadRawSensorLog({
+      ...version2Base,
+      replayInitialization: {
+        action: { type: REPLAY_INITIALIZATION_ACTION.CONTINUE_WITHOUT_LEAN },
+        samples: [],
+        deliveryOffsetsMs: [],
+      },
+    }),
+    /Replay action sample count/,
+  );
+  await assert.rejects(
+    () => loadRawSensorLog({
+      ...version2Base,
+      replayInitialization: {
+        action: { type: REPLAY_INITIALIZATION_ACTION.CONTINUE_WITHOUT_LEAN },
+        actionSampleCount: 0,
+        samples: [{ type: "motion", timestamp: 0 }],
+      },
+    }),
+    /Replay initialization delivery offsets must match/,
+  );
 
-  const mixedClockLog = createRawSensorLog(
+  const mixedClockLog = createLegacyRawSensorLog(
     [
       { type: "orientation", timestamp: 20 },
       { type: "location", timestamp: 1_700_000_000_000 },
@@ -494,6 +866,19 @@ test("dev source flags are URL-only and normal flow returns the browser source u
     await selectSensorSource({ search: "?dev-sensors=unknown", browserSource }),
     browserSource,
   );
+  assert.equal(isRawRecorderExportEnabled("?dev-recorder=1"), true);
+  assert.throws(
+    () => readDevSensorOptions("?dev-recorder=1&dev-sensors=simulator"),
+    /supports real hardware only/,
+  );
+  await assert.rejects(
+    () => selectSensorSource({
+      search: "?dev-recorder=1&dev-sensors=replay&replay-log=ride.json",
+      browserSource,
+      fetchRef: async () => { throw new Error("must reject before fetch"); },
+    }),
+    /supports real hardware only/,
+  );
 
   const timers = manualTimers();
   const simulator = await selectSensorSource({
@@ -510,7 +895,7 @@ test("dev source flags are URL-only and normal flow returns the browser source u
 });
 
 test("replay URL flag loads a stateless file through the unified source selector", async () => {
-  const log = createRawSensorLog([{ type: "orientation", timestamp: 5, gamma: 6 }]);
+  const log = createLegacyRawSensorLog([{ type: "orientation", timestamp: 5, gamma: 6 }]);
   const timers = manualTimers();
   let requestedUrl;
   const source = await selectSensorSource({
