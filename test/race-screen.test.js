@@ -74,6 +74,6 @@ test("derived session capture and dev raw recording remain separate", () => {
   assert.match(main, /force: acceptedLocation/);
   assert.match(main, /aggregateRunReport\([\s\S]*?timing: raceTiming, samples: recordedSession\.samples/);
   assert.match(main, /completedSession = Object\.freeze\(\{ report, exported: false \}\)/);
-  assert.match(main, /renderRunReport\(reportScreen, report\)/);
+  assert.match(main, /renderRunReport\(reportScreen, report, \{ onTrim: applyLapTrim \}\)/);
   assert.match(html, /MAX SPEED|AVG SPEED|TRACK · TOP SPEED POINT/);
 });

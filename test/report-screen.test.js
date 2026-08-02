@@ -27,7 +27,7 @@ test("Report reproduces the dense header, three columns, stat grid, and footer",
 });
 
 test("Report renderer includes all lap rows, tied-best highlighting, and coherent empty states", () => {
-  assert.match(renderer, /report\.laps\.map\(createLapRow\)/);
+  assert.match(renderer, /for \(const lap of report\.laps\)[\s\S]*?createLapRow\(lap, report/);
   assert.match(renderer, /lap\.isBest \? " · BEST"/);
   assert.match(renderer, /NO COMPLETED LAPS/);
   assert.match(renderer, /NO LOCATION DATA/);
@@ -40,7 +40,7 @@ test("ended report wiring keeps a reload-reset in-memory run count and reserved 
   assert.match(main, /runCount \+= 1/);
   assert.doesNotMatch(main, /localStorage|sessionStorage|indexedDB/i);
   assert.match(main, /\{ runNumber: runCount, runId: null, riderId: null \}/);
-  assert.match(main, /aggregateRunReport\([\s\S]*?renderRunReport\(reportScreen, report\)/);
+  assert.match(main, /aggregateRunReport\([\s\S]*?renderRunReport\(reportScreen, report, \{ onTrim: applyLapTrim \}\)/);
 });
 
 test("NEW RUN confirms only while the completed run is unexported and SAVE uses one seam", () => {
@@ -56,9 +56,29 @@ test("NEW RUN confirms only while the completed run is unexported and SAVE uses 
   assert.match(main, /const runStore = Object\.freeze\(\{[\s\S]*?async save/);
 });
 
+test("SAVE seam receives the latest trimmed report and each ended report clears old accordion state", () => {
+  const trimBlock = main.slice(
+    main.indexOf("function applyLapTrim"),
+    main.indexOf("function render("),
+  );
+  const endBlock = main.slice(
+    main.indexOf("[data-action=\"end-race\"]"),
+    main.indexOf("[data-action=\"new-run\"]"),
+  );
+  const saveBlock = main.slice(
+    main.indexOf("saveButton.addEventListener"),
+    main.indexOf("[data-action=\"continue-limited\"]"),
+  );
+  assert.match(trimBlock, /adjustLapBoundaryIfAllowed\([\s\S]*?completedSession\.report/);
+  assert.match(trimBlock, /completedSession = Object\.freeze\(\{ report, exported: false \}\)/);
+  assert.match(saveBlock, /const sessionBeingSaved = completedSession/);
+  assert.match(saveBlock, /runStore\.save\(sessionBeingSaved\.report\)/);
+  assert.match(endBlock, /delete reportScreen\.dataset\.expandedLap;[\s\S]*?renderRunReport/);
+});
+
 test("recorded session readings carry explicit monotonic GPS freshness", () => {
   assert.match(main, /let lastValidSpeedReceivedAt = null/);
-  assert.match(main, /aggregateRunReport, MAX_VALID_SPEED_INTERVAL_MS/);
+  assert.match(main, /aggregateRunReport,[\s\S]*?MAX_VALID_SPEED_INTERVAL_MS/);
   assert.match(main, /Number\.isFinite\(lastValidSpeedReceivedAt\)[\s\S]*?speedAge <= MAX_VALID_SPEED_INTERVAL_MS/);
   assert.match(main, /speedMph: speed\.hasSpeed \? speed\.mph : null,[\s\S]*?speedValid/);
 });

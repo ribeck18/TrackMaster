@@ -18,7 +18,11 @@ import {
   startLapTiming,
 } from "./core/lap-timing.js";
 import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js";
-import { aggregateRunReport, MAX_VALID_SPEED_INTERVAL_MS } from "./core/report.js";
+import {
+  adjustLapBoundaryIfAllowed,
+  aggregateRunReport,
+  MAX_VALID_SPEED_INTERVAL_MS,
+} from "./core/report.js";
 import { createSessionRecorder } from "./core/session-recorder.js";
 import {
   isRawRecorderExportEnabled,
@@ -92,6 +96,21 @@ let lastLapActivationAt = Number.NEGATIVE_INFINITY;
 let runCount = 0;
 
 const MINIMUM_LAP_ACTIVATION_INTERVAL_MS = 500;
+
+function applyLapTrim(lapIndex, adjustmentMs) {
+  if (currentState !== "report" || !completedSession) return;
+  const report = adjustLapBoundaryIfAllowed(
+    completedSession.report,
+    lapIndex,
+    adjustmentMs,
+  );
+  if (report === completedSession.report) return;
+  completedSession = Object.freeze({ report, exported: false });
+  renderRunReport(reportScreen, report, {
+    onTrim: applyLapTrim,
+    focusTrim: { lapIndex, adjustmentMs },
+  });
+}
 
 function render(nextState, { moveFocus = true } = {}) {
   currentState = nextState;
@@ -455,7 +474,8 @@ document.querySelector('[data-action="end-race"]').addEventListener("click", (ev
     { runNumber: runCount, runId: null, riderId: null },
   );
   completedSession = Object.freeze({ report, exported: false });
-  renderRunReport(reportScreen, report);
+  delete reportScreen.dataset.expandedLap;
+  renderRunReport(reportScreen, report, { onTrim: applyLapTrim });
   stopRaceTimer();
   void raceWakeLock.stop();
 
@@ -476,6 +496,7 @@ document.querySelector('[data-action="new-run"]').addEventListener("click", () =
   }
   raceTiming = null;
   completedSession = null;
+  delete reportScreen.dataset.expandedLap;
   dispatch("NEW_RUN");
 });
 
