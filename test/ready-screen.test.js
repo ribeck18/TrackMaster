@@ -53,12 +53,27 @@ test("parked SVG uses the exact viewBox, arc, tick, needle, and hub geometry", (
   assert.match(css, /\.gauge-hub \{[\s\S]*?stroke-width: 4/);
 });
 
-test("GPS warning and 5 Hz whole-number renderer are wired to the unified subscription", () => {
+test("live lean geometry and stable ZERO readiness are wired on Ready", () => {
+  assert.match(html, /data-lean-instrument/);
+  assert.match(html, /data-calibration-status/);
+  assert.match(main, /createBikeFrameCalibrationWindow/);
+  assert.match(main, /leanEstimator\.calibrate\(readiness\.gravity\)/);
+  assert.match(main, /calibrationWindow\.add\(sample, monotonicNow\(\)\)/);
+  assert.match(main, /isGyroDeliveryFresh\(lastGyroReceivedAt, monotonicNow\(\)\)/);
+  assert.match(main, /"CONTINUE WITHOUT LEAN"/);
+  assert.match(main, /leanReading\.calibrated && gyroFresh \? leanReading\.leanDegrees : Number\.NaN/);
+  assert.match(css, /\.gauge-active \{[\s\S]*?transition: d 80ms linear/);
+  assert.match(css, /\.gauge-needle \{[\s\S]*?transition: x2 80ms linear, y2 80ms linear/);
+});
+
+test("GPS and lean DOM rendering share one capped 200 ms instrument timer", () => {
   assert.match(html, /data-gps-warning role="status">GPS · NO FIX/);
   assert.match(main, /sensorSource\.subscribe\(handleSensorSample\)/);
-  assert.match(main, /gpsSpeedometer\.handle\(sample\)/);
+  assert.match(main, /gpsSpeedometer\.kinematicSample\(\)/);
   assert.match(main, /reading\.hasSpeed \? String\(reading\.mph\) : "--"/);
-  assert.match(main, /window\.setInterval\(renderGpsSpeed, 200\)/);
+  assert.match(main, /window\.setInterval\(renderInstruments, 200\)/);
+  const handler = main.slice(main.indexOf("function handleSensorSample"), main.indexOf("sensorSource.subscribe"));
+  assert.doesNotMatch(handler, /leanGauge\.render/, "native-cadence estimation must not write the DOM");
 });
 
 test("Ready remains one native full-screen glove-sized start action", () => {

@@ -48,7 +48,8 @@
           <h1 id="calibrate-title" tabindex="-1">LEVEL &amp; ZERO SENSORS</h1>
           <p class="screen-copy">Mount your phone and hold the bike fully upright. Tap zero to set the current position as 0° lean.</p>
           <p class="sensor-readouts" data-access-summary>LEAN <output data-readout="motion">WAITING</output> · SPEED <output data-readout="location">WAITING</output></p>
-          <button class="primary-button" type="button" data-action="zero">ZERO NOW</button>
+          <p class="calibration-status" data-calibration-status data-ready="false">WAITING FOR MOTION</p>
+          <button class="primary-button" type="button" data-action="zero">WAITING…</button>
         </div>
       </section>
 
@@ -66,14 +67,14 @@
               <p class="gps-warning" data-gps-warning role="status">GPS · NO FIX</p>
             </div>
             <div class="instrument-divider" aria-hidden="true"></div>
-            <div class="instrument-column lean-instrument">
+            <div class="instrument-column lean-instrument" data-lean-instrument>
               <p class="instrument-eyebrow">LEAN ANGLE</p>
               <div class="lean-gauge">
                 <svg viewBox="0 0 400 232" role="img" aria-labelledby="ready-gauge-title ready-gauge-description">
                   <title id="ready-gauge-title">Lean angle gauge</title>
                   <desc id="ready-gauge-description">Parked at zero degrees and level</desc>
                   <path class="gauge-track" d="M 56.582 97.950 A 182 182 0 0 1 343.418 97.950"></path>
-                  <path class="gauge-active" d="M 200 28 L 200 28"></path>
+                  <path class="gauge-active" d="M 200 28 A 182 182 0 0 1 200 28"></path>
                   <g class="gauge-ticks">
                     <line class="gauge-tick gauge-tick--major" x1="93.934" y1="103.934" x2="76.963" y2="86.963"></line>
                     <line class="gauge-tick" x1="120" y1="71.436" x2="113" y2="59.312"></line>

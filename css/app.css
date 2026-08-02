@@ -302,6 +302,7 @@ h1 {
 
 .gauge-active {
   stroke: var(--accent);
+  transition: d 80ms linear;
 }
 
 .gauge-tick {
@@ -318,6 +319,7 @@ h1 {
   stroke-width: 6;
   stroke-linecap: round;
   filter: drop-shadow(0 0 6px rgba(182, 255, 46, 0.7));
+  transition: x2 80ms linear, y2 80ms linear;
 }
 
 .gauge-hub {
@@ -528,6 +530,18 @@ h1 {
 .sensor-status [data-status="unavailable"],
 .sensor-status [data-status="unsupported"] {
   color: #ffc85c;
+}
+
+.calibration-status {
+  margin: 0;
+  color: #ffc85c;
+  font-family: "Space Mono", monospace;
+  font-size: clamp(8px, 2.25vmin, 10px);
+  letter-spacing: 2px;
+}
+
+.calibration-status[data-ready="true"] {
+  color: var(--accent);
 }
 
 .sensor-readouts {
@@ -763,5 +777,10 @@ noscript {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+  }
+
+  .gauge-active,
+  .gauge-needle {
+    transition: none;
   }
 }

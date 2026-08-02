@@ -162,6 +162,29 @@ test("light smoothing and integer hysteresis prevent adjacent-value flicker", ()
   assert.ok(speedometer.snapshot().mph > 50, "a meaningful speed change is not hidden");
 });
 
+test("kinematic sample shares accepted platform and fallback-derived speed", () => {
+  const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
+  speedometer.handle(fix({ timestamp: 1_700_000_000_000, longitude: 0, speed: null }));
+  assert.deepEqual(speedometer.kinematicSample(), {
+    type: "location",
+    timestamp: 1_700_000_000_000,
+    speedMps: null,
+  });
+  speedometer.handle(fix({ timestamp: 1_700_000_001_000, longitude: 0.0001, speed: null }));
+  const fallback = speedometer.kinematicSample();
+  assert.equal(fallback.timestamp, 1_700_000_001_000);
+  assert.ok(fallback.speedMps > 11 && fallback.speedMps < 11.2);
+
+  speedometer.handle(fix({ timestamp: 1_700_000_000_500, longitude: 1, speed: 99 }));
+  assert.deepEqual(
+    speedometer.kinematicSample(),
+    fallback,
+    "reordered raw fixes cannot replace or refresh the shared speed sample",
+  );
+  speedometer.handle(fix({ timestamp: 1_700_000_002_000, longitude: 0.0002, speed: 7 }));
+  assert.equal(speedometer.kinematicSample().speedMps, 7);
+});
+
 test("simulator and replay location samples use the same speedometer seam", async () => {
   const simulatorTimers = manualTimers();
   const simulator = createSyntheticSensorSource({

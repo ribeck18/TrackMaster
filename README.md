@@ -1,6 +1,6 @@
 # Apex Lap Tracker
 
-Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. The current app provides the forced-landscape shell, the Enable Sensors → Calibrate flow, and a raw sensor simulator/record/replay harness. Estimation, timing, reports, and offline installation remain separate later issues.
+Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. The current app provides the forced-landscape shell, the Enable Sensors → Calibrate flow, live Ready speed and fused lean instruments, and a raw sensor simulator/record/replay harness. Timing, reports, and offline installation remain separate later issues.
 
 ## Run locally
 
@@ -22,11 +22,17 @@ npm test
 
 The normal rider flow always uses the browser motion and location source. Developer sources are selected only by URL parameters; there is no in-app control or route to them.
 
-- `?dev-sensors=simulator` replaces hardware with a deterministic 38-second session. It includes low-speed (under 15 mph) manoeuvring, sustained constant-radius corners in both directions, an 85-to-12 mph upright braking event, and physically gradual acceleration/finish sections. Add `&dev-rate=4` to replay four times faster.
+- `?dev-sensors=simulator` replaces hardware with a deterministic 38-second session. It begins with a stable calibration interval, then includes low-speed (under 15 mph) manoeuvring, physically matched constant-radius corners in both directions, an 85-to-12 mph upright braking event, and gradual acceleration/finish sections. Its source readings include gravity, normalized three-axis body gyro rate, and orientation alongside GPS. Add `&dev-rate=4` to replay four times faster.
 - `?dev-sensors=replay&replay-log=./path/to/raw-log.json` loads an exported raw JSON log and emits its readings through the same `requestAccess()` / `subscribe()` / `destroy()` source seam. `dev-rate` changes only delivery speed; sample values and timestamps are unchanged.
 - `?dev-recorder=1` keeps real hardware selected, records every timestamped reading directly at the source seam during Race, and exports the in-memory JSON log when **END RACE** is tapped.
 
 Recording uses RAM only. Export uses the Web Share API or an in-memory Blob download and never writes to localStorage, IndexedDB, or another application store. The log loader accepts JSON text, `Blob`/`File`, or a parsed log object.
+
+## Lean estimation
+
+`ZERO NOW` enables only after a recent stable window contains valid gravity and three-axis gyro readings; the accepted gravity vectors are averaged into an orthonormal bike frame. In this issue the forward/roll axis is explicitly the configured mount assumption (device +Y, the phone's long axis); automatic forward-axis refinement remains deferred to issue #6.
+
+At the browser seam, `DeviceMotionEvent.rotationRate` is normalized from `alpha/beta/gamma` to explicit device `x/y/z`. The pure-math estimator integrates body roll for tip-in response, recovers world yaw from the physically rotated leaned body-rate vector, and complements it with the drift-free `atan(speed × yawRate / g)` anchor using the same platform-or-derived speed as the speedometer. GPS trust rejects reordered timestamps and expires by monotonic reception age without comparing GPS epoch time to `performance.now()`. The estimator remains gyro-only through GPS gaps, learns changing stationary bias, slowly returns verified stationary lean to upright, and clamps signed output to ±60°. A missing or stalled gyro renders lean `N/A`; estimation still runs at sensor cadence while instrument DOM writes are capped at 5 Hz.
 
 ## Deploy with GitHub Pages
 
@@ -55,4 +61,4 @@ All repository-owned assets use document-relative paths (`./css/...`, `./js/...`
 
 ## Current scope
 
-The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready renders smoothed live GPS speed in MPH, no-fix recovery, and the exact parked lean gauge. Race and Report retain only the minimum controls needed to prove routing; live lean estimation, lap timing, and report UI behavior belong to later issues.
+The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready renders smoothed live GPS speed in MPH, no-fix recovery, and the live fused lean gauge with signed direction. Race and Report retain only the minimum controls needed to prove routing; race instrumentation, lap timing, and report UI behavior belong to later issues.

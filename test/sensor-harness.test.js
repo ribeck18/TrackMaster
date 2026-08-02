@@ -112,13 +112,17 @@ test("synthetic sessions include sustained corners, upright braking, and sub-15-
   assert.ok(cornerLocations.length >= 10);
   assert.ok(cornerLocations.every((sample) => sample.speed === 55 * 0.44704));
   assert.ok(cornerLocations.at(-1).heading - cornerLocations[0].heading >= 80);
-  assert.ok(cornerOrientations.every((sample) => sample.gamma === 38));
+  assert.ok(
+    cornerOrientations.every(
+      (sample) => sample.gamma === SYNTHETIC_SCENARIOS.sustainedCorner.trueLeanDegrees,
+    ),
+  );
 
   const brakingLocations = samplesInRange(samples, SYNTHETIC_SCENARIOS.uprightHardBraking, "location");
   const brakingOrientations = samplesInRange(samples, SYNTHETIC_SCENARIOS.uprightHardBraking, "orientation");
   assert.ok(brakingLocations[0].speed > 80 * 0.44704);
   assert.ok(brakingLocations.at(-1).speed < 15 * 0.44704);
-  assert.ok(brakingLocations.every((sample) => sample.heading === 120));
+  assert.ok(brakingLocations.every((sample) => sample.heading === 127.5));
   assert.ok(brakingOrientations.every((sample) => sample.gamma === 0));
 
   const paddock = samplesInRange(samples, SYNTHETIC_SCENARIOS.lowSpeedManoeuvring, "location");
@@ -135,7 +139,33 @@ test("synthetic sessions include sustained corners, upright braking, and sub-15-
   );
 });
 
-test("the simulator implements the hardware source seam and emits only hardware-shaped readings", async () => {
+test("simulator pitch deltas integrate from body-right gyro after removing leaned yaw", () => {
+  const samples = createSyntheticSessionSamples();
+  const orientations = new Map(
+    samples.filter(({ type }) => type === "orientation").map((sample) => [sample.timestamp, sample]),
+  );
+  const motions = samples.filter(({ type }) => type === "motion");
+  let integratedPitch = orientations.get(0).beta;
+
+  for (let index = 1; index < motions.length; index += 1) {
+    const motion = motions[index];
+    const current = orientations.get(motion.timestamp);
+    const previous = orientations.get(motions[index - 1].timestamp);
+    const elapsedSeconds = (motion.timestamp - motions[index - 1].timestamp) / 1_000;
+    const headingDelta = ((current.alpha - previous.alpha + 540) % 360) - 180;
+    const yawRate = headingDelta / elapsedSeconds;
+    const leanRadians = (current.gamma * Math.PI) / 180;
+    const recoveredPitchRate = motion.rotationRate.x - yawRate * Math.sin(leanRadians);
+
+    integratedPitch += recoveredPitchRate * elapsedSeconds;
+    assert.ok(
+      Math.abs(integratedPitch - current.beta) < 1e-9,
+      `pitch gyro integration diverged at ${motion.timestamp} ms`,
+    );
+  }
+});
+
+test("the simulator implements the normalized source seam with explicit body-rate axes", async () => {
   const timers = manualTimers();
   const source = createSyntheticSensorSource({
     samples: createSyntheticSessionSamples({ durationMs: 34_000 }).slice(0, 5),
@@ -152,8 +182,15 @@ test("the simulator implements the hardware source seam and emits only hardware-
   assert.equal(outcomes.motion.status, SENSOR_STATUS.GRANTED);
   assert.equal(outcomes.location.status, SENSOR_STATUS.GRANTED);
   assert.equal(emitted.length, 5);
-  assert.ok(emitted.every((sample) => sample.type === "orientation" || sample.type === "location"));
+  assert.ok(
+    emitted.every((sample) =>
+      sample.type === "orientation" || sample.type === "motion" || sample.type === "location",
+    ),
+  );
   assert.ok(emitted.every((sample) => !("scenario" in sample)));
+  const motion = emitted.find((sample) => sample.type === "motion");
+  assert.deepEqual(Object.keys(motion.rotationRate).sort(), ["x", "y", "z"]);
+  assert.equal("alpha" in motion.rotationRate, false);
 });
 
 test("recorder captures timestamped samples before downstream mutation and ignores access events", () => {

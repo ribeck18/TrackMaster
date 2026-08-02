@@ -14,7 +14,12 @@ function location(latitude = 37.1, longitude = -122.2) {
   };
 }
 
-function harness({ requestPermission, orientationSupported = true, geolocation = true } = {}) {
+function harness({
+  requestPermission,
+  orientationSupported = true,
+  motionSupported = orientationSupported,
+  geolocation = true,
+} = {}) {
   const calls = [];
   const listeners = new Map();
   let positionSuccess;
@@ -22,6 +27,7 @@ function harness({ requestPermission, orientationSupported = true, geolocation =
   let motionResolve;
 
   const OrientationEvent = orientationSupported ? class DeviceOrientationEvent {} : undefined;
+  const MotionEvent = motionSupported ? class DeviceMotionEvent {} : undefined;
   if (requestPermission === true) {
     OrientationEvent.requestPermission = () => {
       calls.push("motion-request");
@@ -33,6 +39,7 @@ function harness({ requestPermission, orientationSupported = true, geolocation =
 
   const windowRef = {
     DeviceOrientationEvent: OrientationEvent,
+    DeviceMotionEvent: MotionEvent,
     addEventListener(type, listener) {
       calls.push(`listen-${type}`);
       listeners.set(type, listener);
@@ -256,6 +263,34 @@ test("non-iOS motion falls through to direct event subscription", async () => {
   ]);
 });
 
+test("browser-shaped alpha/beta/gamma are independently normalized to x/y/z at the seam", async () => {
+  const app = harness({ requestPermission: false, geolocation: false });
+  const samples = [];
+  app.source.subscribe((sample) => samples.push(sample));
+  await app.source.requestAccess();
+
+  app.listeners.get("devicemotion")({
+    timeStamp: 123,
+    accelerationIncludingGravity: { x: 1, y: 2, z: 9.4 },
+    rotationRate: { alpha: 3, beta: 4, gamma: 5 },
+    interval: 16.7,
+  });
+  assert.deepEqual(samples, [{
+    type: "motion",
+    timestamp: 123,
+    accelerationIncludingGravity: { x: 1, y: 2, z: 9.4 },
+    rotationRate: { x: 3, y: 4, z: 5 },
+    interval: 16.7,
+  }]);
+});
+
+test("orientation without a usable DeviceMotion gyro is not reported as lean-capable", async () => {
+  const app = harness({ orientationSupported: true, motionSupported: false, geolocation: false });
+  const outcomes = await app.source.requestAccess();
+  assert.equal(outcomes.motion.status, SENSOR_STATUS.UNSUPPORTED);
+  assert.equal(app.calls.includes("listen-deviceorientation"), false);
+});
+
 test("missing sensor APIs resolve unsupported without hanging", async () => {
   const app = harness({ orientationSupported: false, geolocation: false });
   const outcomes = await app.source.requestAccess();
@@ -285,10 +320,12 @@ test("an unusable Geolocation API is unsupported", async () => {
 test("a platform permission promise that never settles has a finite unsupported outcome", async () => {
   const timers = [];
   class DeviceOrientationEvent {}
-  DeviceOrientationEvent.requestPermission = () => new Promise(() => {});
+  class DeviceMotionEvent {}
+  DeviceMotionEvent.requestPermission = () => new Promise(() => {});
   const source = createBrowserSensorSource({
     windowRef: {
       DeviceOrientationEvent,
+      DeviceMotionEvent,
       addEventListener() {},
       removeEventListener() {},
     },

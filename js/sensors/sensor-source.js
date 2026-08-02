@@ -25,6 +25,7 @@ export function createBrowserSensorSource({
 } = {}) {
   const subscribers = new Set();
   let orientationListening = false;
+  let motionListening = false;
   let locationWatchId = null;
   let accessPromise = null;
   let destroyed = false;
@@ -46,20 +47,64 @@ export function createBrowserSensorSource({
     });
   }
 
-  function startOrientationEvents() {
-    if (destroyed || orientationListening) return;
-    windowRef.addEventListener("deviceorientation", onOrientation, true);
-    orientationListening = true;
+  function onMotion(event) {
+    const acceleration = event.accelerationIncludingGravity;
+    const rate = event.rotationRate;
+    const hasGravity =
+      acceleration &&
+      Number.isFinite(acceleration.x) &&
+      Number.isFinite(acceleration.y) &&
+      Number.isFinite(acceleration.z);
+    const hasRate =
+      rate &&
+      Number.isFinite(rate.alpha) &&
+      Number.isFinite(rate.beta) &&
+      Number.isFinite(rate.gamma);
+    if (!hasGravity && !hasRate) return;
+
+    emit({
+      type: "motion",
+      timestamp: Number.isFinite(event.timeStamp) ? event.timeStamp : Date.now(),
+      accelerationIncludingGravity: hasGravity
+        ? { x: acceleration.x, y: acceleration.y, z: acceleration.z }
+        : null,
+      // Normalize the browser-shaped alpha/beta/gamma fields exactly once.
+      // Downstream physics consumes explicit device x/y/z only.
+      rotationRate: hasRate
+        ? { x: rate.alpha, y: rate.beta, z: rate.gamma }
+        : null,
+      interval: Number.isFinite(event.interval) ? event.interval : null,
+    });
+  }
+
+  function startMotionEvents({ orientationAvailable, deviceMotionAvailable }) {
+    if (destroyed) return;
+    if (orientationAvailable && !orientationListening) {
+      windowRef.addEventListener("deviceorientation", onOrientation, true);
+      orientationListening = true;
+    }
+    if (deviceMotionAvailable && !motionListening) {
+      windowRef.addEventListener("devicemotion", onMotion, true);
+      motionListening = true;
+    }
   }
 
   function requestMotionAccess() {
     const OrientationEvent = windowRef?.DeviceOrientationEvent;
-    if (!OrientationEvent || typeof windowRef?.addEventListener !== "function") {
-      return Promise.resolve(result(SENSOR_STATUS.UNSUPPORTED, "Device orientation is not available."));
+    const MotionEvent = windowRef?.DeviceMotionEvent;
+    if (!MotionEvent || typeof windowRef?.addEventListener !== "function") {
+      return Promise.resolve(
+        result(SENSOR_STATUS.UNSUPPORTED, "A usable DeviceMotion gyroscope is not available."),
+      );
     }
 
-    if (typeof OrientationEvent.requestPermission !== "function") {
-      startOrientationEvents();
+    const PermissionEvent =
+      typeof MotionEvent?.requestPermission === "function" ? MotionEvent : OrientationEvent;
+    if (typeof PermissionEvent?.requestPermission !== "function") {
+      startMotionEvents({
+        orientationAvailable: Boolean(OrientationEvent),
+        deviceMotionAvailable: Boolean(MotionEvent),
+      });
       return Promise.resolve(result(SENSOR_STATUS.GRANTED, "Direct event subscription is available."));
     }
 
@@ -67,7 +112,7 @@ export function createBrowserSensorSource({
     try {
       // This call is deliberately made before requestAccess() yields, preserving
       // iOS Safari's requirement that it occur inside the button gesture.
-      permissionRequest = OrientationEvent.requestPermission();
+      permissionRequest = PermissionEvent.requestPermission();
     } catch (error) {
       return Promise.resolve(result(SENSOR_STATUS.UNSUPPORTED, error?.message ?? "Motion access failed."));
     }
@@ -90,7 +135,10 @@ export function createBrowserSensorSource({
         .then((permission) => {
           if (settled) return;
           if (permission === "granted") {
-            startOrientationEvents();
+            startMotionEvents({
+              orientationAvailable: Boolean(OrientationEvent),
+              deviceMotionAvailable: Boolean(MotionEvent),
+            });
             finish(result(SENSOR_STATUS.GRANTED));
             return;
           }
@@ -240,6 +288,10 @@ export function createBrowserSensorSource({
     if (orientationListening) {
       windowRef.removeEventListener("deviceorientation", onOrientation, true);
       orientationListening = false;
+    }
+    if (motionListening) {
+      windowRef.removeEventListener("devicemotion", onMotion, true);
+      motionListening = false;
     }
     if (locationWatchId !== null && typeof navigatorRef?.geolocation?.clearWatch === "function") {
       navigatorRef.geolocation.clearWatch(locationWatchId);

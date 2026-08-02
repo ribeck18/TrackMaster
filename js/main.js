@@ -1,5 +1,11 @@
 import { createAccessOutcomeState } from "./access-outcome-state.js";
+import { createBikeFrameCalibrationWindow } from "./core/bike-frame.js";
 import { createGpsSpeedometer } from "./core/gps-speed.js";
+import {
+  assertLeanEstimator,
+  createLeanEstimator,
+  isGyroDeliveryFresh,
+} from "./core/lean-estimator.js";
 import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js";
 import {
   isRawRecorderExportEnabled,
@@ -9,6 +15,7 @@ import { STATES, transition } from "./router.js";
 import { shouldDestroySensorsOnPageHide } from "./page-lifecycle.js";
 import { createBrowserSensorSource, SENSOR_STATUS } from "./sensors/sensor-source.js";
 import { calculateBubbleOffset } from "./sensors/spirit-level.js";
+import { createLeanGaugeRenderer } from "./ui/lean-gauge.js";
 
 const screens = new Map(
   [...document.querySelectorAll("[data-screen]")].map((screen) => [
@@ -33,9 +40,17 @@ const accessOutcomeState = createAccessOutcomeState();
 const gpsSpeedometer = createGpsSpeedometer();
 const speedValue = document.querySelector("[data-speed-value]");
 const gpsWarning = document.querySelector("[data-gps-warning]");
+const zeroButton = document.querySelector('[data-action="zero"]');
+const calibrationStatus = document.querySelector("[data-calibration-status]");
+const monotonicNow = globalThis.performance?.now?.bind(globalThis.performance) ?? Date.now;
+const leanEstimator = assertLeanEstimator(createLeanEstimator({ nowRef: monotonicNow }));
+const calibrationWindow = createBikeFrameCalibrationWindow({ nowRef: monotonicNow });
+const leanGauge = createLeanGaugeRenderer(document.querySelector("[data-lean-instrument]"));
 
 let currentState = "enable";
 let lap = 1;
+let lastGyroReceivedAt = null;
+let motionGrantedAt = null;
 
 function render(nextState, { moveFocus = true } = {}) {
   currentState = nextState;
@@ -76,9 +91,46 @@ function updateSpiritLevel(sample) {
   bubble.style.setProperty("--bubble-y", `${offset.y.toFixed(2)}px`);
 }
 
+function updateCalibrationUi() {
+  const outcome = accessOutcomeState.getCurrent()?.motion;
+  if (outcome?.status !== SENSOR_STATUS.GRANTED) return;
+  const now = monotonicNow();
+  const readiness = calibrationWindow.snapshot(now);
+  const gyroFresh = isGyroDeliveryFresh(lastGyroReceivedAt, now);
+  const gyroTimedOut =
+    Number.isFinite(motionGrantedAt) && now - motionGrantedAt > 1_000 && !gyroFresh;
+  zeroButton.disabled = !readiness.ready && !gyroTimedOut;
+  zeroButton.textContent = readiness.ready
+    ? "ZERO NOW"
+    : gyroTimedOut
+      ? "CONTINUE WITHOUT LEAN"
+      : "WAITING…";
+  calibrationStatus.textContent = gyroTimedOut ? "GYROSCOPE NOT DELIVERING" : readiness.reason;
+  calibrationStatus.dataset.ready = String(readiness.ready);
+}
+
 function handleSensorSample(sample) {
-  gpsSpeedometer.handle(sample);
   updateSpiritLevel(sample);
+
+  if (sample.type === "location") {
+    gpsSpeedometer.handle(sample);
+    const kinematicSample = gpsSpeedometer.kinematicSample();
+    if (kinematicSample?.timestamp === sample.timestamp) leanEstimator.update(kinematicSample);
+  } else {
+    gpsSpeedometer.handle(sample);
+  }
+
+  if (sample.type === "motion") {
+    if (
+      sample.rotationRate &&
+      [sample.rotationRate.x, sample.rotationRate.y, sample.rotationRate.z].every(Number.isFinite)
+    ) {
+      lastGyroReceivedAt = monotonicNow();
+    }
+    calibrationWindow.add(sample, monotonicNow());
+    if (currentState === "cal") updateCalibrationUi();
+    leanEstimator.update(sample);
+  }
 
   if (sample.type !== "access") return;
   const recoveredOutcomes = accessOutcomeState.record(sample.sensor, sample.outcome);
@@ -108,7 +160,10 @@ function recoveryParagraph(text) {
 }
 
 function applyAccessOutcomes(outcomes) {
-  if (outcomes.location.status !== SENSOR_STATUS.GRANTED) gpsSpeedometer.clearFix();
+  if (outcomes.location.status !== SENSOR_STATUS.GRANTED) {
+    gpsSpeedometer.clearFix();
+    leanEstimator.clearLocation();
+  }
 
   const recovery = document.querySelector("[data-recovery-guidance]");
   recovery.replaceChildren();
@@ -154,6 +209,15 @@ function applyAccessOutcomes(outcomes) {
   }
 
   const motionAvailable = outcomes.motion.status === SENSOR_STATUS.GRANTED;
+  if (motionAvailable && motionGrantedAt === null) motionGrantedAt = monotonicNow();
+  if (!motionAvailable) {
+    motionGrantedAt = null;
+    calibrationWindow.reset();
+    zeroButton.disabled = false;
+    leanGauge.render(Number.NaN);
+  } else {
+    updateCalibrationUi();
+  }
   spiritLevel.classList.toggle("level--unavailable", !motionAvailable);
   spiritLevel.setAttribute(
     "aria-label",
@@ -161,8 +225,11 @@ function applyAccessOutcomes(outcomes) {
   );
   unavailableLevel.hidden = motionAvailable;
 
-  const zeroButton = document.querySelector('[data-action="zero"]');
-  zeroButton.textContent = motionAvailable ? "ZERO NOW" : "CONTINUE";
+  if (!motionAvailable) {
+    zeroButton.textContent = "CONTINUE";
+    calibrationStatus.textContent = "LEAN SENSOR UNAVAILABLE";
+    calibrationStatus.dataset.ready = "false";
+  }
 }
 
 enableButton.addEventListener("click", async () => {
@@ -195,7 +262,37 @@ enableButton.addEventListener("click", async () => {
   }
 });
 
-document.querySelector('[data-action="zero"]').addEventListener("click", () => {
+zeroButton.addEventListener("click", () => {
+  const motionAvailable =
+    accessOutcomeState.getCurrent()?.motion.status === SENSOR_STATUS.GRANTED;
+  if (motionAvailable) {
+    const now = monotonicNow();
+    const readiness = calibrationWindow.snapshot(now);
+    if (!readiness.ready) {
+      const gyroTimedOut =
+        Number.isFinite(motionGrantedAt) &&
+        now - motionGrantedAt > 1_000 &&
+        !isGyroDeliveryFresh(lastGyroReceivedAt, now);
+      if (gyroTimedOut) {
+        leanGauge.render(Number.NaN);
+        dispatch("ZERO");
+        return;
+      }
+      updateCalibrationUi();
+      return;
+    }
+    try {
+      leanEstimator.calibrate(readiness.gravity);
+      leanGauge.render(0);
+    } catch (error) {
+      console.error("Bike-frame calibration failed.", error);
+      calibrationWindow.reset();
+      updateCalibrationUi();
+      return;
+    }
+  } else {
+    leanGauge.render(Number.NaN);
+  }
   dispatch("ZERO");
 });
 
@@ -230,7 +327,7 @@ document.querySelector('[data-action="continue-limited"]').addEventListener("cli
   dispatch("CONTINUE_LIMITED");
 });
 
-function renderGpsSpeed() {
+function renderInstruments() {
   const reading = gpsSpeedometer.snapshot();
   const nextValue = reading.hasSpeed ? String(reading.mph) : "--";
   if (speedValue.textContent !== nextValue) speedValue.textContent = nextValue;
@@ -240,19 +337,24 @@ function renderGpsSpeed() {
   );
   if (gpsWarning.textContent !== reading.warning) gpsWarning.textContent = reading.warning;
   gpsWarning.classList.toggle("is-clear", reading.warning === "");
+
+  const leanReading = leanEstimator.snapshot();
+  const gyroFresh = isGyroDeliveryFresh(lastGyroReceivedAt, monotonicNow());
+  leanGauge.render(leanReading.calibrated && gyroFresh ? leanReading.leanDegrees : Number.NaN);
+  if (currentState === "cal") updateCalibrationUi();
 }
 
 // Instrument numerals are intentionally capped at 5 Hz even when a simulator,
 // replay, or future browser source delivers fixes faster than the GPS radio.
-const speedRenderTimer = window.setInterval(renderGpsSpeed, 200);
-renderGpsSpeed();
+const instrumentRenderTimer = window.setInterval(renderInstruments, 200);
+renderInstruments();
 
 window.addEventListener("pagehide", (event) => {
   // A persisted pagehide enters the back-forward cache; its live JS heap and
   // sensor source resume on pageshow, so destroying here would make the restored
   // UI permanently stale. Final navigations still release both platform watches.
   if (shouldDestroySensorsOnPageHide(event)) {
-    window.clearInterval(speedRenderTimer);
+    window.clearInterval(instrumentRenderTimer);
     sensorSource.destroy();
   }
 });

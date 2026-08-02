@@ -136,6 +136,15 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
     return snapshot();
   }
 
+  function kinematicSample() {
+    if (!previousPosition) return null;
+    return Object.freeze({
+      type: "location",
+      timestamp: previousPosition.timestamp,
+      speedMps: smoothedMph === null ? null : smoothedMph / METRES_PER_SECOND_TO_MPH,
+    });
+  }
+
   function snapshot() {
     const hasSpeed = hasFix && displayedMph !== null;
     return Object.freeze({
@@ -147,5 +156,5 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
     });
   }
 
-  return Object.freeze({ handle, clearFix, snapshot });
+  return Object.freeze({ handle, clearFix, kinematicSample, snapshot });
 }
