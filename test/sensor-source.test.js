@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createAccessOutcomeState } from "../js/access-outcome-state.js";
+import { createLeanEstimator } from "../js/core/lean-estimator.js";
 import {
   createBrowserSensorSource,
   SENSOR_STATUS,
@@ -279,9 +280,35 @@ test("browser-shaped alpha/beta/gamma are independently normalized to x/y/z at t
     type: "motion",
     timestamp: 123,
     accelerationIncludingGravity: { x: 1, y: 2, z: 9.4 },
-    rotationRate: { x: 3, y: 4, z: 5 },
+    rotationRate: { x: 4, y: 5, z: 3 },
     interval: 16.7,
   }]);
+});
+
+test("browser-shaped device-Y rotation drives lean while device-X pitch does not", async () => {
+  async function estimateLean(rotationRate) {
+    const app = harness({ requestPermission: false, geolocation: false });
+    const estimator = createLeanEstimator({ stationaryRateThresholdDps: 0.1 });
+    estimator.calibrate({ x: 0, y: 0, z: 9.80665 });
+    app.source.subscribe((sample) => estimator.update(sample));
+    await app.source.requestAccess();
+
+    for (const timeStamp of [0, 100]) {
+      app.listeners.get("devicemotion")({
+        timeStamp,
+        accelerationIncludingGravity: { x: 0, y: 0, z: 9.80665 },
+        rotationRate,
+        interval: 100,
+      });
+    }
+    return estimator.snapshot().leanDegrees;
+  }
+
+  const deviceYLean = await estimateLean({ alpha: 0, beta: 0, gamma: 20 });
+  const deviceXLean = await estimateLean({ alpha: 0, beta: 20, gamma: 0 });
+
+  assert.ok(Math.abs(deviceYLean - 2) < 1e-9, `device-Y lean was ${deviceYLean}°`);
+  assert.ok(Math.abs(deviceXLean) < 1e-9, `device-X pitch produced ${deviceXLean}° lean`);
 });
 
 test("orientation without a usable DeviceMotion gyro is not reported as lean-capable", async () => {

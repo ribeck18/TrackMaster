@@ -71,7 +71,7 @@ export function createBrowserSensorSource({
       // Normalize the browser-shaped alpha/beta/gamma fields exactly once.
       // Downstream physics consumes explicit device x/y/z only.
       rotationRate: hasRate
-        ? { x: rate.alpha, y: rate.beta, z: rate.gamma }
+        ? { x: rate.beta, y: rate.gamma, z: rate.alpha }
         : null,
       interval: Number.isFinite(event.interval) ? event.interval : null,
     });
