@@ -1,6 +1,6 @@
 # Apex Lap Tracker
 
-Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. This first slice provides the forced-landscape application shell and the Enable Sensors → Calibrate entry flow. Sensor readings, timing, reports, offline installation, and persistence/export are intentionally reserved for later issues.
+Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. The current app provides the forced-landscape shell, the Enable Sensors → Calibrate flow, and a raw sensor simulator/record/replay harness. Estimation, timing, reports, and offline installation remain separate later issues.
 
 ## Run locally
 
@@ -17,6 +17,16 @@ npm test
 ```
 
 > Local HTTP is useful for layout work only. iPhone motion and location APIs require a secure HTTPS deployment.
+
+## Developer sensor harness
+
+The normal rider flow always uses the browser motion and location source. Developer sources are selected only by URL parameters; there is no in-app control or route to them.
+
+- `?dev-sensors=simulator` replaces hardware with a deterministic 38-second session. It includes low-speed (under 15 mph) manoeuvring, sustained constant-radius corners in both directions, an 85-to-12 mph upright braking event, and physically gradual acceleration/finish sections. Add `&dev-rate=4` to replay four times faster.
+- `?dev-sensors=replay&replay-log=./path/to/raw-log.json` loads an exported raw JSON log and emits its readings through the same `requestAccess()` / `subscribe()` / `destroy()` source seam. `dev-rate` changes only delivery speed; sample values and timestamps are unchanged.
+- `?dev-recorder=1` keeps real hardware selected, records every timestamped reading directly at the source seam during Race, and exports the in-memory JSON log when **END RACE** is tapped.
+
+Recording uses RAM only. Export uses the Web Share API or an in-memory Blob download and never writes to localStorage, IndexedDB, or another application store. The log loader accepts JSON text, `Blob`/`File`, or a parsed log object.
 
 ## Deploy with GitHub Pages
 
@@ -37,7 +47,7 @@ Pages is repository configuration and cannot be enabled by application code. Pub
 - Confirm that the Rotation Lock hint is visible but does not block the button.
 - Turn the phone physically landscape. The app should use native landscape without the hint.
 - Confirm that content stays clear of the notch/Dynamic Island on either landscape edge.
-- Tap **ENABLE SENSORS**, then **ZERO NOW**. This issue only verifies routing; no permission request or sensor capture is implemented yet.
+- Tap **ENABLE SENSORS**, grant or decline each permission, and confirm the live spirit level or documented degraded state before tapping **ZERO NOW**.
 
 ## Deployment-safe paths
 
@@ -45,4 +55,4 @@ All repository-owned assets use document-relative paths (`./css/...`, `./js/...`
 
 ## Current scope
 
-The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Permission Denied is a recovery placeholder for the later sensor-permissions issue and is not part of the normal path yet. Ready, Race, and Report contain only the minimum controls needed to prove routing; their live instruments and session behavior belong to later issues.
+The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready, Race, and Report retain only the minimum controls needed to prove routing; estimator, lap timing, and report UI behavior belong to later issues.

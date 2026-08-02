@@ -1,4 +1,9 @@
 import { createAccessOutcomeState } from "./access-outcome-state.js";
+import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js";
+import {
+  isRawRecorderExportEnabled,
+  selectSensorSource,
+} from "./dev/dev-sensor-source.js";
 import { STATES, transition } from "./router.js";
 import { shouldDestroySensorsOnPageHide } from "./page-lifecycle.js";
 import { createBrowserSensorSource, SENSOR_STATUS } from "./sensors/sensor-source.js";
@@ -11,7 +16,14 @@ const screens = new Map(
   ]),
 );
 
-const sensorSource = createBrowserSensorSource();
+const browserSensorSource = createBrowserSensorSource();
+const selectedSensorSource = await selectSensorSource({
+  search: window.location.search,
+  browserSource: browserSensorSource,
+});
+const exportRawRecording = isRawRecorderExportEnabled(window.location.search);
+const rawRecorder = exportRawRecording ? createRawSensorRecorder(selectedSensorSource) : null;
+const sensorSource = rawRecorder ?? selectedSensorSource;
 const spiritLevel = document.querySelector("[data-spirit-level]");
 const bubble = spiritLevel.querySelector(".level__bubble");
 const unavailableLevel = spiritLevel.querySelector(".level__unavailable");
@@ -183,6 +195,7 @@ document.querySelector('[data-action="zero"]').addEventListener("click", () => {
 document.querySelector('[data-action="start-race"]').addEventListener("click", () => {
   lap = 1;
   document.querySelector("[data-lap-number]").textContent = String(lap);
+  rawRecorder?.startRecording();
   dispatch("START_RACE");
 });
 
@@ -194,6 +207,10 @@ document.querySelector('[data-action="complete-lap"]').addEventListener("click",
 
 document.querySelector('[data-action="end-race"]').addEventListener("click", (event) => {
   event.stopPropagation();
+  if (rawRecorder) {
+    const rawLog = rawRecorder.stopRecording();
+    void exportRawSensorLog(rawLog).catch((error) => console.error("Raw sensor export failed.", error));
+  }
   dispatch("END_RACE");
 });
 
