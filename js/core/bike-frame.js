@@ -44,9 +44,9 @@ export function normalize(vector, label = "Vector") {
  *
  * accelerationIncludingGravity points along the support/up direction on the
  * browser sensor API while the phone is stationary. That complete 3-vector is
- * retained as bike vertical. Per issue #5, forward-axis refinement belongs to
- * issue #6: for now the configured mount axis (the phone's long +Y axis) is
- * projected onto the plane normal to vertical.
+ * retained as bike vertical. The configured mount axis (the phone's long +Y
+ * axis) is projected onto the plane normal to vertical, producing the
+ * immediately usable assumed frame that background refinement can later rotate.
  */
 export function captureBikeFrame(gravityVector, {
   assumedForwardAxis = Object.freeze({ x: 0, y: 1, z: 0 }),

@@ -14,6 +14,7 @@ const SECOND_CORNER_LEAN = equilibriumLean(50, -15);
 
 export const SYNTHETIC_SCENARIOS = Object.freeze({
   lowSpeedManoeuvring: Object.freeze({ start: 0, end: 3_900 }),
+  firstStraight: Object.freeze({ start: 4_000, end: 7_900 }),
   sustainedCorner: Object.freeze({ start: 8_500, end: 14_400, trueLeanDegrees: FIRST_CORNER_LEAN }),
   uprightHardBraking: Object.freeze({ start: 18_000, end: 21_000 }),
   secondLowSpeedManoeuvring: Object.freeze({ start: 21_100, end: 23_900 }),
@@ -32,9 +33,13 @@ function stateAt(timestamp) {
     const progress = (timestamp - 2_000) / 2_000;
     return { speedMph: 8, heading: interpolate(330, 390, progress), roll: 7, pitch: 1 };
   }
+  if (timestamp < 6_000) {
+    const progress = (timestamp - 4_000) / 2_000;
+    return { speedMph: interpolate(8, 35, progress), heading: 30, roll: 0, pitch: -5 };
+  }
   if (timestamp < 8_000) {
-    const progress = (timestamp - 4_000) / 4_000;
-    return { speedMph: interpolate(8, 55, progress), heading: 30, roll: 0, pitch: -5 };
+    const progress = (timestamp - 6_000) / 2_000;
+    return { speedMph: interpolate(35, 55, progress), heading: 30, roll: 0, pitch: -5 };
   }
   if (timestamp < 8_500) {
     const progress = (timestamp - 8_000) / 500;
@@ -99,14 +104,42 @@ function headingDelta(next, previous) {
   return ((next - previous + 540) % 360) - 180;
 }
 
+function pitchBikeVector(vector, pitchDegrees) {
+  const radians = (pitchDegrees * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return {
+    x: vector.x,
+    y: vector.y * cosine + vector.z * sine,
+    z: -vector.y * sine + vector.z * cosine,
+  };
+}
+
+function yawTwistBikeVector(vector, mountYawDegrees) {
+  const radians = (mountYawDegrees * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return {
+    x: vector.x * cosine + vector.y * sine,
+    y: -vector.x * sine + vector.y * cosine,
+    z: vector.z,
+  };
+}
+
 /**
  * Builds the exact raw readings emitted by the desk simulator. There is no
  * randomness or wall-clock input, so separate runs produce byte-for-byte equal
  * sample arrays.
  */
-export function createSyntheticSessionSamples({ durationMs = 38_000 } = {}) {
+export function createSyntheticSessionSamples({
+  durationMs = 38_000,
+  mountYawDegrees = 0,
+} = {}) {
   if (!Number.isInteger(durationMs) || durationMs < 34_000) {
     throw new RangeError("Synthetic sessions must include the complete 34 second scenario set.");
+  }
+  if (!Number.isFinite(mountYawDegrees) || Math.abs(mountYawDegrees) > 45) {
+    throw new RangeError("Synthetic mount yaw must be finite and no more than 45 degrees.");
   }
 
   const samples = [];
@@ -165,16 +198,16 @@ export function createSyntheticSessionSamples({ durationMs = 38_000 } = {}) {
     samples.push({
       type: "motion",
       timestamp,
-      accelerationIncludingGravity: {
+      accelerationIncludingGravity: yawTwistBikeVector(pitchBikeVector({
         x: 0,
         y: longitudinalAcceleration,
         z: effectiveVerticalGravity,
-      },
-      rotationRate: {
+      }, state.pitch), mountYawDegrees),
+      rotationRate: yawTwistBikeVector({
         x: pitchRate + yawRate * Math.sin(leanRadians),
         y: rollRate,
         z: -yawRate * Math.cos(leanRadians),
-      },
+      }, mountYawDegrees),
       interval: 100,
     });
   }

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  bearingDegrees,
   createGpsSpeedometer,
   deriveSpeedMetresPerSecond,
   GPS_SPEED_SOURCE,
@@ -169,11 +170,17 @@ test("kinematic sample shares accepted platform and fallback-derived speed", () 
     type: "location",
     timestamp: 1_700_000_000_000,
     speedMps: null,
+    evidenceSpeedMps: null,
+    headingDegrees: null,
+    courseHeadingDegrees: null,
+    accuracy: 3,
   });
   speedometer.handle(fix({ timestamp: 1_700_000_001_000, longitude: 0.0001, speed: null }));
   const fallback = speedometer.kinematicSample();
   assert.equal(fallback.timestamp, 1_700_000_001_000);
   assert.ok(fallback.speedMps > 11 && fallback.speedMps < 11.2);
+  assert.equal(fallback.evidenceSpeedMps, fallback.speedMps);
+  assert.equal(fallback.accuracy, 3);
 
   speedometer.handle(fix({ timestamp: 1_700_000_000_500, longitude: 1, speed: 99 }));
   assert.deepEqual(
@@ -183,6 +190,39 @@ test("kinematic sample shares accepted platform and fallback-derived speed", () 
   );
   speedometer.handle(fix({ timestamp: 1_700_000_002_000, longitude: 0.0002, speed: 7 }));
   assert.equal(speedometer.kinematicSample().speedMps, 7);
+});
+
+test("refinement evidence keeps unsmoothed speed, course, and GPS accuracy", () => {
+  const speedometer = createGpsSpeedometer();
+  speedometer.handle({
+    ...fix({ timestamp: 0, latitude: 0, longitude: 0, speed: 10 }),
+    heading: 90,
+    accuracy: 4,
+  });
+  speedometer.handle({
+    ...fix({ timestamp: 1_000, latitude: 0, longitude: 0.0002, speed: 20 }),
+    heading: 90,
+    accuracy: 5,
+  });
+  const sample = speedometer.kinematicSample();
+  assert.equal(sample.evidenceSpeedMps, 20);
+  assert.equal(sample.speedMps, 13.5, "kinematic lean anchoring retains display smoothing");
+  assert.equal(sample.accuracy, 5);
+  assert.ok(Math.abs(sample.courseHeadingDegrees - 90) < 0.01);
+});
+
+test("kinematic heading prefers platform data and derives a wrap-safe bearing", () => {
+  const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
+  speedometer.handle({ ...fix({ timestamp: 0, latitude: 0, longitude: 179.999, speed: 15 }), heading: 359 });
+  assert.equal(speedometer.kinematicSample().headingDegrees, 359);
+  assert.equal(speedometer.kinematicSample().accuracy, 3);
+
+  speedometer.handle(fix({ timestamp: 1_000, latitude: 0, longitude: -179.999, speed: 15 }));
+  assert.ok(Math.abs(speedometer.kinematicSample().headingDegrees - 90) < 0.01);
+  assert.ok(Math.abs(bearingDegrees(
+    { latitude: 0, longitude: 179.999 },
+    { latitude: 0, longitude: -179.999 },
+  ) - 90) < 0.01);
 });
 
 test("simulator and replay location samples use the same speedometer seam", async () => {

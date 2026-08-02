@@ -165,6 +165,27 @@ test("simulator pitch deltas integrate from body-right gyro after removing leane
   }
 });
 
+test("simulator acceleration rotates gravity and longitudinal force through pitch and mount yaw", () => {
+  const timestamp = 5_000;
+  const untwisted = createSyntheticSessionSamples()
+    .find((sample) => sample.type === "motion" && sample.timestamp === timestamp);
+  const previousSpeedMph = 8 + 27 * ((timestamp - 100 - 4_000) / 2_000);
+  const currentSpeedMph = 8 + 27 * ((timestamp - 4_000) / 2_000);
+  const longitudinal = (currentSpeedMph - previousSpeedMph) * 0.44704 / 0.1;
+  const pitch = -5 * Math.PI / 180;
+  const expectedForward = longitudinal * Math.cos(pitch) + 9.80665 * Math.sin(pitch);
+  const expectedVertical = -longitudinal * Math.sin(pitch) + 9.80665 * Math.cos(pitch);
+  assert.ok(Math.abs(untwisted.accelerationIncludingGravity.y - expectedForward) < 1e-12);
+  assert.ok(Math.abs(untwisted.accelerationIncludingGravity.z - expectedVertical) < 1e-12);
+
+  const twisted = createSyntheticSessionSamples({ mountYawDegrees: 20 })
+    .find((sample) => sample.type === "motion" && sample.timestamp === timestamp);
+  const yaw = 20 * Math.PI / 180;
+  assert.ok(Math.abs(twisted.accelerationIncludingGravity.x - expectedForward * Math.sin(yaw)) < 1e-12);
+  assert.ok(Math.abs(twisted.accelerationIncludingGravity.y - expectedForward * Math.cos(yaw)) < 1e-12);
+  assert.ok(Math.abs(twisted.accelerationIncludingGravity.z - expectedVertical) < 1e-12);
+});
+
 test("the simulator implements the normalized source seam with explicit body-rate axes", async () => {
   const timers = manualTimers();
   const source = createSyntheticSensorSource({

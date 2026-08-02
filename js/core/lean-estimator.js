@@ -4,6 +4,7 @@ import {
   magnitude,
   normalize,
 } from "./bike-frame.js";
+import { createForwardAxisRefiner } from "./forward-axis-refiner.js";
 
 const GRAVITY_METRES_PER_SECOND_SQUARED = 9.80665;
 const MPH_TO_METRES_PER_SECOND = 0.44704;
@@ -25,6 +26,7 @@ export const DEFAULT_LEAN_ESTIMATOR_OPTIONS = Object.freeze({
   kinematicRollSuppressionFullDps: 3,
   biasTimeConstantSeconds: 2,
   stationaryRateThresholdDps: 0.8,
+  stationaryBiasAcquisitionThresholdDps: 5,
   stationaryGravityTolerance: 0.12,
   stationaryVerticalCosine: Math.cos((8 * Math.PI) / 180),
   maximumIntegrationStepSeconds: 0.1,
@@ -70,6 +72,7 @@ function validateOptions(options) {
     "kinematicRollSuppressionFullDps",
     "biasTimeConstantSeconds",
     "stationaryRateThresholdDps",
+    "stationaryBiasAcquisitionThresholdDps",
     "stationaryGravityTolerance",
     "maximumIntegrationStepSeconds",
     "uprightCorrectionTimeConstantSeconds",
@@ -106,12 +109,13 @@ export function createLeanEstimator(options = {}) {
   const config = validateOptions(estimatorOptions);
   let frame = null;
   let leanDegrees = 0;
-  let rollBiasDps = 0;
+  let gyroBiasDps = { x: 0, y: 0, z: 0 };
   let speedMps = null;
   let lastLocationTimestamp = null;
   let lastLocationReceivedAt = null;
   let lastMotionTimestamp = null;
   let lastKinematicDegrees = null;
+  let forwardRefiner = null;
 
   function calibrate(sampleOrGravity) {
     const vector = gravityVector(sampleOrGravity) ?? sampleOrGravity;
@@ -121,8 +125,12 @@ export function createLeanEstimator(options = {}) {
         ? { assumedForwardAxis: estimatorOptions.assumedForwardAxis }
         : undefined,
     );
+    forwardRefiner = createForwardAxisRefiner(frame, {
+      nowRef,
+      ...(estimatorOptions.forwardRefinementOptions ?? {}),
+    });
     leanDegrees = 0;
-    rollBiasDps = 0;
+    gyroBiasDps = { x: 0, y: 0, z: 0 };
     lastMotionTimestamp = null;
     lastKinematicDegrees = null;
     return frame;
@@ -136,9 +144,11 @@ export function createLeanEstimator(options = {}) {
       return snapshot();
     }
     lastLocationTimestamp = sample.timestamp;
+    const receivedAt = nowRef();
     if (Number.isFinite(sample.speedMps) && sample.speedMps >= 0) {
       speedMps = sample.speedMps;
-      lastLocationReceivedAt = nowRef();
+      lastLocationReceivedAt = receivedAt;
+      forwardRefiner?.addLocation(sample, receivedAt);
     } else {
       speedMps = null;
       lastLocationReceivedAt = null;
@@ -169,18 +179,26 @@ export function createLeanEstimator(options = {}) {
     if (elapsedSeconds <= 0) return snapshot();
     lastMotionTimestamp = sample.timestamp;
     const dt = Math.min(elapsedSeconds, config.maximumIntegrationStepSeconds);
+    const receivedAt = nowRef();
+    let unbiasedAngularVelocity = {
+      x: angularVelocity.x - gyroBiasDps.x,
+      y: angularVelocity.y - gyroBiasDps.y,
+      z: angularVelocity.z - gyroBiasDps.z,
+    };
+    forwardRefiner?.addMotion({ ...sample, rotationRate: unbiasedAngularVelocity }, receivedAt);
+    if (forwardRefiner) frame = forwardRefiner.advance(dt);
 
     // With right × forward = vertical, positive rotation around forward tips
     // vertical toward bike-right. Device yaw has the opposite sign to compass
     // heading, hence the minus on yaw rate.
-    const rollRateDps = dot(angularVelocity, frame.forward);
-    const rightRateDps = dot(angularVelocity, frame.right);
-    const verticalRateDps = dot(angularVelocity, frame.vertical);
+    let rollRateDps = dot(unbiasedAngularVelocity, frame.forward);
+    let rightRateDps = dot(unbiasedAngularVelocity, frame.right);
+    let verticalRateDps = dot(unbiasedAngularVelocity, frame.vertical);
     const leanRadians = (leanDegrees * Math.PI) / 180;
     // A world-vertical yaw vector resolves in the leaned body frame as
     // +right·sin(lean) - vertical·cos(lean) for a positive/right turn. Taking
     // that unit-vector projection avoids the singular division by cos(lean).
-    const yawRateDps =
+    let yawRateDps =
       rightRateDps * Math.sin(leanRadians) - verticalRateDps * Math.cos(leanRadians);
 
     const measuredGravity = gravityVector(sample);
@@ -191,17 +209,32 @@ export function createLeanEstimator(options = {}) {
       const stationary =
         Math.abs(rollRateDps) <= config.stationaryRateThresholdDps &&
         Math.abs(yawRateDps) <= config.stationaryRateThresholdDps &&
+        magnitude(unbiasedAngularVelocity) <= config.stationaryBiasAcquisitionThresholdDps &&
         magnitudeError <= config.stationaryGravityTolerance &&
         alignment >= config.stationaryVerticalCosine;
       if (stationary) {
         const biasGain = 1 - Math.exp(-dt / config.biasTimeConstantSeconds);
-        rollBiasDps += biasGain * (rollRateDps - rollBiasDps);
+        gyroBiasDps = {
+          x: gyroBiasDps.x + biasGain * (angularVelocity.x - gyroBiasDps.x),
+          y: gyroBiasDps.y + biasGain * (angularVelocity.y - gyroBiasDps.y),
+          z: gyroBiasDps.z + biasGain * (angularVelocity.z - gyroBiasDps.z),
+        };
+        unbiasedAngularVelocity = {
+          x: angularVelocity.x - gyroBiasDps.x,
+          y: angularVelocity.y - gyroBiasDps.y,
+          z: angularVelocity.z - gyroBiasDps.z,
+        };
+        rollRateDps = dot(unbiasedAngularVelocity, frame.forward);
+        rightRateDps = dot(unbiasedAngularVelocity, frame.right);
+        verticalRateDps = dot(unbiasedAngularVelocity, frame.vertical);
+        yawRateDps =
+          rightRateDps * Math.sin(leanRadians) - verticalRateDps * Math.cos(leanRadians);
         const uprightGain = 1 - Math.exp(-dt / config.uprightCorrectionTimeConstantSeconds);
         leanDegrees += uprightGain * (0 - leanDegrees);
       }
     }
 
-    leanDegrees += (rollRateDps - rollBiasDps) * dt;
+    leanDegrees += rollRateDps * dt;
     lastKinematicDegrees = null;
 
     if (hasFreshLocation()) {
@@ -213,7 +246,7 @@ export function createLeanEstimator(options = {}) {
       // while roll motion is active so the fast gyro path is not pulled back
       // toward upright before yaw has developed.
       const rollSuppressionPosition =
-        (Math.abs(rollRateDps - rollBiasDps) - config.kinematicRollSuppressionStartDps) /
+        (Math.abs(rollRateDps) - config.kinematicRollSuppressionStartDps) /
         (config.kinematicRollSuppressionFullDps - config.kinematicRollSuppressionStartDps);
       const trust = speedTrust * (1 - smoothstep(rollSuppressionPosition));
       if (trust > 0) {
@@ -240,6 +273,7 @@ export function createLeanEstimator(options = {}) {
     lastLocationTimestamp = null;
     lastLocationReceivedAt = null;
     lastKinematicDegrees = null;
+    forwardRefiner?.clearLocation();
   }
 
   function snapshot() {

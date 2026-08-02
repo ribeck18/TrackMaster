@@ -21,6 +21,28 @@ function radians(degrees) {
   return (degrees * Math.PI) / 180;
 }
 
+function normalizeHeading(degrees) {
+  return ((degrees % 360) + 360) % 360;
+}
+
+export function bearingDegrees(first, second) {
+  if (
+    !isValidCoordinate(first?.latitude, first?.longitude) ||
+    !isValidCoordinate(second?.latitude, second?.longitude) ||
+    distanceMetres(first, second) < 1
+  ) {
+    return null;
+  }
+  const firstLatitude = radians(first.latitude);
+  const secondLatitude = radians(second.latitude);
+  const longitudeDelta = radians(second.longitude - first.longitude);
+  const y = Math.sin(longitudeDelta) * Math.cos(secondLatitude);
+  const x =
+    Math.cos(firstLatitude) * Math.sin(secondLatitude) -
+    Math.sin(firstLatitude) * Math.cos(secondLatitude) * Math.cos(longitudeDelta);
+  return normalizeHeading((Math.atan2(y, x) * 180) / Math.PI);
+}
+
 export function distanceMetres(first, second) {
   if (
     !isValidCoordinate(first?.latitude, first?.longitude) ||
@@ -66,6 +88,10 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
   let smoothedMph = null;
   let displayedMph = null;
   let speedSource = null;
+  let headingDegrees = null;
+  let courseHeadingDegrees = null;
+  let evidenceSpeedMps = null;
+  let accuracy = null;
 
   function clearFix() {
     previousPosition = null;
@@ -73,6 +99,10 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
     smoothedMph = null;
     displayedMph = null;
     speedSource = null;
+    headingDegrees = null;
+    courseHeadingDegrees = null;
+    evidenceSpeedMps = null;
+    accuracy = null;
   }
 
   function updateDisplayedValue() {
@@ -109,6 +139,15 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
       if (metresPerSecond !== null) source = GPS_SPEED_SOURCE.DERIVED;
     }
 
+    const derivedHeading = previousPosition === null
+      ? null
+      : bearingDegrees(previousPosition, sample);
+    headingDegrees = Number.isFinite(sample.heading)
+      ? normalizeHeading(sample.heading)
+      : derivedHeading;
+    courseHeadingDegrees = derivedHeading;
+    evidenceSpeedMps = metresPerSecond;
+    accuracy = Number.isFinite(sample.accuracy) && sample.accuracy >= 0 ? sample.accuracy : null;
     previousPosition = {
       timestamp: sample.timestamp,
       latitude: sample.latitude,
@@ -142,6 +181,10 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
       type: "location",
       timestamp: previousPosition.timestamp,
       speedMps: smoothedMph === null ? null : smoothedMph / METRES_PER_SECOND_TO_MPH,
+      evidenceSpeedMps,
+      headingDegrees,
+      courseHeadingDegrees,
+      accuracy,
     });
   }
 
