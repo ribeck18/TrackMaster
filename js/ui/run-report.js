@@ -1,5 +1,6 @@
 import { formatLapTime } from "../core/lap-timing.js";
 import { LAP_TRIM_STEP_MS, lapTrimControls } from "../core/report.js";
+import { createTrackMapModel, TRACK_VIEWBOX } from "../core/track-map.js";
 
 const activeRenderTokens = new WeakMap();
 
@@ -118,6 +119,100 @@ function focusAfterTrim(root, report, focusTrim) {
   target?.focus({ preventScroll: true });
 }
 
+function createSvgElement(name) {
+  return document.createElementNS("http://www.w3.org/2000/svg", name);
+}
+
+function renderTrackMap(root, report, renderToken) {
+  const map = root.querySelector("[data-report-map]");
+  const model = createTrackMapModel(report.samples, report.topSpeedPoint);
+  map.replaceChildren();
+  map.dataset.location = model.state === "no-fix" ? "unavailable" : "available";
+  map.dataset.trackState = model.state;
+
+  if (model.state !== "ready") {
+    map.disabled = true;
+    delete map.dataset.trackMode;
+    delete root.dataset.trackMode;
+    map.setAttribute("aria-label", model.message);
+    const state = document.createElement("span");
+    state.className = "report-map__state";
+    state.dataset.mapState = "";
+    state.textContent = model.message;
+    map.append(state);
+    return model;
+  }
+
+  map.disabled = false;
+  const svg = createSvgElement("svg");
+  svg.classList?.add("report-map__trace");
+  svg.setAttribute("viewBox", `0 0 ${TRACK_VIEWBOX.width} ${TRACK_VIEWBOX.height}`);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  svg.setAttribute("aria-hidden", "true");
+
+  const underlay = createSvgElement("polyline");
+  underlay.classList?.add("report-map__underlay");
+  underlay.setAttribute("points", model.projectedPoints.map(({ x, y }) => `${x},${y}`).join(" "));
+  svg.append(underlay);
+
+  const segmentElements = model.segments.map((segment) => {
+    const line = createSvgElement("line");
+    line.classList?.add("report-map__segment");
+    line.setAttribute("x1", segment.x1);
+    line.setAttribute("y1", segment.y1);
+    line.setAttribute("x2", segment.x2);
+    line.setAttribute("y2", segment.y2);
+    line.dataset.speedColor = segment.speedColor;
+    line.dataset.leanColor = segment.leanColor;
+    svg.append(line);
+    return line;
+  });
+
+  if (model.marker !== null) {
+    const marker = createSvgElement("circle");
+    marker.classList?.add("report-map__marker");
+    marker.dataset.topSpeedMarker = "";
+    marker.dataset.topSpeedTimestamp = String(model.marker.topSpeedTimestamp);
+    marker.setAttribute("cx", model.marker.x);
+    marker.setAttribute("cy", model.marker.y);
+    marker.setAttribute("r", 5);
+    svg.append(marker);
+  }
+
+  const modeLabel = document.createElement("span");
+  modeLabel.className = "report-map__mode";
+  modeLabel.dataset.mapMode = "";
+  const state = document.createElement("span");
+  state.className = "visually-hidden";
+  state.dataset.mapState = "";
+  state.textContent = "TRACK TRACE READY";
+  map.append(svg, modeLabel, state);
+
+  let mode = root.dataset.trackMode === "lean" ? "lean" : "speed";
+  function updateMode() {
+    root.dataset.trackMode = mode;
+    map.dataset.trackMode = mode;
+    const speedMode = mode === "speed";
+    modeLabel.textContent = speedMode ? "COLOR · SPEED · TAP FOR LEAN" : "COLOR · LEAN L/R · TAP FOR SPEED";
+    map.setAttribute(
+      "aria-label",
+      speedMode
+        ? "Track trace colored by session-relative speed. Tap for left and right lean colors."
+        : "Track trace colored by left and right lean. Tap for speed colors.",
+    );
+    for (const line of segmentElements) {
+      line.setAttribute("stroke", speedMode ? line.dataset.speedColor : line.dataset.leanColor);
+    }
+  }
+  updateMode();
+  map.addEventListener("click", () => {
+    if (activeRenderTokens.get(root) !== renderToken) return;
+    mode = mode === "speed" ? "lean" : "speed";
+    updateMode();
+  });
+  return model;
+}
+
 /** Renders a completed immutable report snapshot into the report screen. */
 export function renderRunReport(root, report, { onTrim = null, focusTrim = null } = {}) {
   if (!(root instanceof Element)) throw new TypeError("A report screen element is required.");
@@ -178,18 +273,11 @@ export function renderRunReport(root, report, { onTrim = null, focusTrim = null 
   root.querySelector("[data-report-right-lean]").textContent =
     report.stats.maxLeanRightDegrees === null ? "--" : `${Math.round(report.stats.maxLeanRightDegrees)}°`;
 
-  const map = root.querySelector("[data-report-map]");
-  map.dataset.location = report.location.available ? "available" : "unavailable";
-  map.querySelector("[data-map-state]").textContent = report.location.available
-    ? "TRACK MAP · READY FOR #10"
-    : "NO LOCATION DATA";
+  renderTrackMap(root, report, renderToken);
 
   const point = report.topSpeedPoint;
   root.querySelector("[data-top-speed]").textContent = `${displayNumber(point?.speedMph ?? null)} MPH`;
   root.querySelector("[data-top-speed-context]").textContent = formatTopSpeedContext(point);
-  // #10 will project the immutable point onto the GPS polyline. Keep the
-  // placeholder honest rather than placing a decorative marker at fake coords.
-  root.querySelector("[data-top-speed-marker]").hidden = true;
 
   root.querySelector("[data-save-status]").textContent = "";
   focusAfterTrim(root, report, focusTrim);

@@ -16,16 +16,24 @@ class FakeElement {
     this.focused = false;
     this.listeners = new Map();
     this.queries = new Map();
+    this.classList = { add: (...names) => {
+      this.className = [this.className, ...names].filter(Boolean).join(" ");
+    } };
   }
 
   querySelector(selector) {
     const mapped = this.queries.get(selector);
     if (mapped) return mapped;
-    const attributes = [...selector.matchAll(/\[data-([a-z-]+)="([^"]+)"\]/g)];
-    if (attributes.length > 0 && attributes.every(([, name, value]) => {
-      const key = name.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-      return this.dataset[key] === value;
-    })) {
+    const valuedAttributes = [...selector.matchAll(/\[data-([a-z-]+)="([^"]+)"\]/g)];
+    const bareAttributes = [...selector.matchAll(/\[data-([a-z-]+)\](?!\s*=)/g)];
+    if ((valuedAttributes.length > 0 || bareAttributes.length > 0) &&
+        valuedAttributes.every(([, name, value]) => {
+          const key = name.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+          return this.dataset[key] === value;
+        }) && bareAttributes.every(([, name]) => {
+          const key = name.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+          return Object.hasOwn(this.dataset, key);
+        })) {
       return this;
     }
     for (const child of this.children) {
@@ -70,7 +78,10 @@ class FakeElement {
 }
 
 globalThis.Element = FakeElement;
-globalThis.document = { createElement: (tagName) => new FakeElement(tagName) };
+globalThis.document = {
+  createElement: (tagName) => new FakeElement(tagName),
+  createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+};
 const { renderRunReport } = await import("../js/ui/run-report.js");
 
 function reportRoot() {
@@ -85,13 +96,11 @@ function reportRoot() {
     "[data-report-right-lean]",
     "[data-top-speed]",
     "[data-top-speed-context]",
-    "[data-top-speed-marker]",
     "[data-save-status]",
   ]) {
     root.queries.set(selector, new FakeElement());
   }
-  const map = new FakeElement();
-  map.queries.set("[data-map-state]", new FakeElement());
+  const map = new FakeElement("button");
   root.queries.set("[data-report-map]", map);
   return root;
 }
@@ -143,6 +152,97 @@ test("renderer writes populated values, best classes, location state, and then e
   assert.equal(root.querySelector("[data-report-max-speed]").textContent, "--");
   assert.equal(root.querySelector("[data-report-map]").dataset.location, "unavailable");
   assert.equal(root.querySelector("[data-top-speed-context]").textContent, "NO SPEED DATA");
+});
+
+test("map defaults to speed, toggles to signed lean colors, and renders marker plus derived callout", () => {
+  const root = reportRoot();
+  const report = aggregateRunReport({
+    timing: timing({
+      laps: [{ index: 1, startTime: 0, endTime: 10_000, duration: 10_000 }],
+      endedAt: 60_000,
+    }),
+    samples: [
+      { timestamp: 0, speedMph: 20, speedValid: true, leanDegrees: -30, latitude: 37, longitude: -122 },
+      { timestamp: 57_000, speedMph: 100, speedValid: true, leanDegrees: -30, latitude: 37.0002, longitude: -121.9998 },
+      { timestamp: 60_000, speedMph: 50, speedValid: true, leanDegrees: 30, latitude: 37.0004, longitude: -122 },
+    ],
+  });
+
+  renderRunReport(root, report);
+  const map = root.querySelector("[data-report-map]");
+  const svg = map.children[0];
+  const firstSegment = svg.children[1];
+  const speedStroke = firstSegment.attributes.get("stroke");
+  assert.equal(map.dataset.trackMode, "speed");
+  assert.match(map.children[1].textContent, /COLOR · SPEED/);
+  const marker = root.querySelector("[data-top-speed-marker]");
+  assert.ok(marker);
+  assert.equal(marker.dataset.topSpeedTimestamp, "57000");
+  assert.equal(root.querySelector("[data-top-speed]").textContent, "100 MPH");
+  assert.equal(root.querySelector("[data-top-speed-context]").textContent, "LAP 2 · 0:47 INTO LAP");
+
+  map.click();
+  assert.equal(map.dataset.trackMode, "lean");
+  assert.match(map.children[1].textContent, /LEAN L\/R/);
+  assert.notEqual(firstSegment.attributes.get("stroke"), speedStroke);
+  assert.equal(firstSegment.attributes.get("stroke"), firstSegment.dataset.leanColor);
+
+  map.click();
+  assert.equal(map.dataset.trackMode, "speed");
+  assert.equal(firstSegment.attributes.get("stroke"), speedStroke);
+});
+
+test("a filtered top-speed GPS outlier keeps its callout but renders no misleading marker", () => {
+  const root = reportRoot();
+  const report = aggregateRunReport({
+    timing: timing({ endedAt: 3_000 }),
+    samples: [
+      { timestamp: 0, speedMph: 30, speedValid: true, latitude: 37, longitude: -122 },
+      { timestamp: 1_000, speedMph: 120, speedValid: true, latitude: 38, longitude: -121 },
+      { timestamp: 2_000, speedMph: 50, speedValid: true, latitude: 37.0003, longitude: -122 },
+    ],
+  });
+
+  renderRunReport(root, report);
+
+  assert.equal(root.querySelector("[data-report-map]").dataset.trackState, "ready");
+  assert.equal(root.querySelector("[data-top-speed-marker]"), null);
+  assert.equal(root.querySelector("[data-top-speed]").textContent, "120 MPH");
+  assert.equal(root.querySelector("[data-top-speed-context]").textContent, "LAP 1 · 0:01 INTO LAP");
+});
+
+test("renderer distinguishes no-fix, too-few-points, and stationary map states", () => {
+  const cases = [
+    {
+      samples: [],
+      state: "no-fix",
+      message: "NO GPS FIX RECORDED",
+    },
+    {
+      samples: [{ timestamp: 0, speedMph: 20, speedValid: true, latitude: 37, longitude: -122 }],
+      state: "too-few",
+      message: "TOO FEW GPS POINTS · NO PATH",
+    },
+    {
+      samples: [
+        { timestamp: 0, speedMph: 0, speedValid: true, latitude: 37, longitude: -122 },
+        { timestamp: 1_000, speedMph: 0, speedValid: true, latitude: 37.00001, longitude: -122 },
+      ],
+      state: "stationary",
+      message: "STATIONARY TRACE · NO TRACK PATH",
+    },
+  ];
+
+  for (const expected of cases) {
+    const root = reportRoot();
+    const report = aggregateRunReport({ timing: timing(), samples: expected.samples });
+    renderRunReport(root, report);
+    const map = root.querySelector("[data-report-map]");
+    assert.equal(map.dataset.trackState, expected.state);
+    assert.equal(map.querySelector("[data-map-state]").textContent, expected.message);
+    assert.equal(map.disabled, true);
+    assert.equal(root.querySelector("[data-top-speed-marker]"), null);
+  }
 });
 
 test("lap rows reveal accessible trim controls and send exact 0.1 second steps", () => {

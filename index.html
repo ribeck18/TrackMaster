@@ -199,11 +199,9 @@
 
             <section class="report-column report-track-column" aria-labelledby="track-title">
               <h2 id="track-title" class="report-eyebrow">TRACK · TOP SPEED POINT</h2>
-              <div class="report-map" data-report-map data-location="unavailable">
-                <span class="report-map__stripe" aria-hidden="true"></span>
-                <span class="report-map__marker" data-top-speed-marker hidden aria-hidden="true"></span>
-                <p data-map-state>NO LOCATION DATA</p>
-              </div>
+              <button class="report-map" type="button" data-report-map data-location="unavailable" aria-label="No GPS fix recorded">
+                <span data-map-state>NO GPS FIX RECORDED</span>
+              </button>
               <div class="top-speed-card">
                 <output data-top-speed>-- MPH</output>
                 <p data-top-speed-context>NO SPEED DATA</p>

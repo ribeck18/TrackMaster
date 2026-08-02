@@ -475,6 +475,7 @@ document.querySelector('[data-action="end-race"]').addEventListener("click", (ev
   );
   completedSession = Object.freeze({ report, exported: false });
   delete reportScreen.dataset.expandedLap;
+  delete reportScreen.dataset.trackMode;
   renderRunReport(reportScreen, report, { onTrim: applyLapTrim });
   stopRaceTimer();
   void raceWakeLock.stop();
@@ -497,6 +498,7 @@ document.querySelector('[data-action="new-run"]').addEventListener("click", () =
   raceTiming = null;
   completedSession = null;
   delete reportScreen.dataset.expandedLap;
+  delete reportScreen.dataset.trackMode;
   dispatch("NEW_RUN");
 });
 

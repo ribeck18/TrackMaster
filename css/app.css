@@ -722,7 +722,7 @@ h1 {
 .report-empty,
 .report-stat p,
 .report-stat span,
-.report-map p,
+.report-map > span,
 .top-speed-card p,
 .save-status {
   margin: 0;
@@ -927,44 +927,85 @@ h1 {
 .report-map {
   position: relative;
   display: grid;
+  width: 100%;
   min-height: 70px;
   flex: 1;
   overflow: hidden;
   place-items: center;
+  padding: 0;
+  cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 11px;
   background: #101210;
+  color: inherit;
+  font: inherit;
 }
 
-.report-map__stripe {
-  position: absolute;
-  inset: 0;
-  opacity: 0.28;
-  background: repeating-linear-gradient(
-    -35deg,
-    transparent 0 15px,
-    rgba(255, 255, 255, 0.08) 15px 17px
-  );
+.report-map:disabled {
+  cursor: default;
 }
 
-.report-map p {
+.report-map:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.report-map__trace {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 70px;
+}
+
+.report-map__underlay,
+.report-map__segment {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.report-map__underlay {
+  stroke: rgba(0, 0, 0, 0.72);
+  stroke-width: 8;
+}
+
+.report-map__segment {
+  stroke-width: 4.5;
+}
+
+.report-map > span {
   z-index: 1;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.55);
   font-size: 10px;
   letter-spacing: 2px;
   text-align: center;
 }
 
-.report-map__marker {
+.report-map__state {
+  padding: 12px;
+}
+
+.report-map .report-map__mode {
   position: absolute;
-  z-index: 2;
-  top: 38%;
-  left: 62%;
-  width: 12px;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 15px rgba(182, 255, 46, 0.75);
+  top: 7px;
+  left: 8px;
+  padding: 3px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(8, 9, 10, 0.78);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 7px;
+  letter-spacing: 1px;
+  pointer-events: none;
+}
+
+.report-map__marker {
+  fill: var(--accent);
+  stroke: #101210;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 5px rgba(182, 255, 46, 0.95));
+  vector-effect: non-scaling-stroke;
 }
 
 .top-speed-card {
@@ -1288,7 +1329,7 @@ noscript {
     font-size: 10px;
   }
 
-  .report-map p,
+  .report-map > span,
   .top-speed-card p {
     font-size: 7px;
   }

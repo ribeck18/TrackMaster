@@ -6,6 +6,7 @@ const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const css = await readFile(new URL("../css/app.css", import.meta.url), "utf8");
 const main = await readFile(new URL("../js/main.js", import.meta.url), "utf8");
 const renderer = await readFile(new URL("../js/ui/run-report.js", import.meta.url), "utf8");
+const trackMap = await readFile(new URL("../js/core/track-map.js", import.meta.url), "utf8");
 
 test("Report reproduces the dense header, three columns, stat grid, and footer", () => {
   assert.match(html, /class="screen report-screen" data-screen="report"/);
@@ -30,7 +31,9 @@ test("Report renderer includes all lap rows, tied-best highlighting, and coheren
   assert.match(renderer, /for \(const lap of report\.laps\)[\s\S]*?createLapRow\(lap, report/);
   assert.match(renderer, /lap\.isBest \? " · BEST"/);
   assert.match(renderer, /NO COMPLETED LAPS/);
-  assert.match(renderer, /NO LOCATION DATA/);
+  assert.match(trackMap, /NO GPS FIX RECORDED/);
+  assert.match(trackMap, /TOO FEW GPS POINTS/);
+  assert.match(trackMap, /STATIONARY TRACE/);
   assert.match(renderer, /BEST \$\{report\.bestLap === null \? "--:--\.-"/);
   assert.match(renderer, /report\.lapCount === 1 \? "LAP" : "LAPS"/);
 });
@@ -81,6 +84,25 @@ test("recorded session readings carry explicit monotonic GPS freshness", () => {
   assert.match(main, /aggregateRunReport,[\s\S]*?MAX_VALID_SPEED_INTERVAL_MS/);
   assert.match(main, /Number\.isFinite\(lastValidSpeedReceivedAt\)[\s\S]*?speedAge <= MAX_VALID_SPEED_INTERVAL_MS/);
   assert.match(main, /speedMph: speed\.hasSpeed \? speed\.mph : null,[\s\S]*?speedValid/);
+});
+
+test("track map is a local vector control with styled trace, marker, and legible mode", () => {
+  const mapButton = html.match(/<button class="report-map"[\s\S]*?<\/button>/)?.[0] ?? "";
+  assert.match(mapButton, /type="button" data-report-map[\s\S]*?<span data-map-state>/);
+  assert.doesNotMatch(mapButton, /<p[\s>]/);
+  const trackRenderer = renderer.slice(
+    renderer.indexOf("function renderTrackMap"),
+    renderer.indexOf("/** Renders a completed immutable report"),
+  );
+  assert.match(trackRenderer, /document\.createElement\("span"\)/);
+  assert.doesNotMatch(trackRenderer, /document\.createElement\("p"\)/);
+  assert.doesNotMatch(html, /leaflet|mapbox|google\.maps|<canvas/i);
+  assert.match(renderer, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", name\)/);
+  assert.match(renderer, /COLOR · SPEED · TAP FOR LEAN/);
+  assert.match(renderer, /COLOR · LEAN L\/R · TAP FOR SPEED/);
+  assert.match(css, /\.report-map__segment \{[\s\S]*?stroke-width: 4\.5/);
+  assert.match(css, /\.report-map__marker \{[\s\S]*?fill: var\(--accent\)[\s\S]*?drop-shadow/);
+  assert.doesNotMatch(renderer, /fetch\(|XMLHttpRequest|import\(["']https?:/);
 });
 
 test("report CSS preserves stat numeral sizing and compact lap rows", () => {
