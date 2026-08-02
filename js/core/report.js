@@ -1,3 +1,5 @@
+import { MAXIMUM_GPS_FIX_AGE_MS } from "./gps-speed.js";
+
 function finiteOrNull(value) {
   return Number.isFinite(value) ? value : null;
 }
@@ -20,7 +22,7 @@ function hasEveryArrayEntry(values) {
   return true;
 }
 
-export const MAX_VALID_SPEED_INTERVAL_MS = 2_000;
+export const MAX_VALID_SPEED_INTERVAL_MS = MAXIMUM_GPS_FIX_AGE_MS;
 export const LAP_TRIM_STEP_MS = 100;
 export const MAX_LAP_TRIM_MS = 500;
 

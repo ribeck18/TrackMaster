@@ -1,6 +1,7 @@
 const EARTH_RADIUS_METRES = 6_371_000;
 
 export const METRES_PER_SECOND_TO_MPH = 2.23694;
+export const MAXIMUM_GPS_FIX_AGE_MS = 2_000;
 export const GPS_SPEED_SOURCE = Object.freeze({
   PLATFORM: "platform",
   DERIVED: "derived",
@@ -112,6 +113,8 @@ export function createGpsSpeedometer({
   maximumHorizontalAccuracyMetres =
     DEFAULT_GPS_VALIDATION_OPTIONS.maximumHorizontalAccuracyMetres,
   maximumSpeedDisagreementMps = DEFAULT_GPS_VALIDATION_OPTIONS.maximumSpeedDisagreementMps,
+  maximumAgeMs = MAXIMUM_GPS_FIX_AGE_MS,
+  nowRef = globalThis.performance?.now?.bind(globalThis.performance) ?? Date.now,
 } = {}) {
   if (!Number.isFinite(smoothingFactor) || smoothingFactor <= 0 || smoothingFactor > 1) {
     throw new RangeError("GPS smoothing factor must be in the range (0, 1].");
@@ -119,10 +122,14 @@ export function createGpsSpeedometer({
   if (!Number.isFinite(integerHysteresisMph) || integerHysteresisMph < 0.5) {
     throw new RangeError("GPS integer hysteresis must be at least 0.5 MPH.");
   }
+  if (typeof nowRef !== "function") {
+    throw new TypeError("GPS monotonic clock must be a function.");
+  }
   for (const [name, value] of Object.entries({
     maximumSpeedMps,
     maximumHorizontalAccuracyMetres,
     maximumSpeedDisagreementMps,
+    maximumAgeMs,
   })) {
     if (!Number.isFinite(value) || value <= 0) {
       throw new RangeError(`${name} must be a positive finite number.`);
@@ -139,6 +146,7 @@ export function createGpsSpeedometer({
   let evidenceSpeedMps = null;
   let accuracy = null;
   let acceptedLocationTimestamp = null;
+  let lastAcceptedAt = null;
 
   function clearFix() {
     previousPosition = null;
@@ -151,6 +159,7 @@ export function createGpsSpeedometer({
     evidenceSpeedMps = null;
     accuracy = null;
     acceptedLocationTimestamp = null;
+    lastAcceptedAt = null;
   }
 
   function updateDisplayedValue() {
@@ -217,6 +226,7 @@ export function createGpsSpeedometer({
     // happen below it, so rejected fixes leave the last credible baseline
     // intact and the next credible fix can recover without an acceleration gate.
     hasFix = true;
+    lastAcceptedAt = nowRef();
     const derivedHeading = previousPosition === null
       ? null
       : bearingDegrees(previousPosition, sample);
@@ -270,13 +280,26 @@ export function createGpsSpeedometer({
   }
 
   function snapshot() {
-    const hasSpeed = hasFix && displayedMph !== null;
+    const ageMs = nowRef() - lastAcceptedAt;
+    const isFresh =
+      hasFix &&
+      Number.isFinite(lastAcceptedAt) &&
+      Number.isFinite(ageMs) &&
+      ageMs >= 0 &&
+      ageMs <= maximumAgeMs;
+    const hasSpeed = isFresh && displayedMph !== null;
     return Object.freeze({
       hasFix,
       hasSpeed,
       mph: hasSpeed ? displayedMph : null,
       source: hasSpeed ? speedSource : null,
-      warning: hasFix ? (hasSpeed ? "" : "GPS · SPEED ACQUIRING") : "GPS · NO FIX",
+      warning: !hasFix
+        ? "GPS · NO FIX"
+        : !isFresh
+          ? "GPS · STALE"
+          : hasSpeed
+            ? ""
+            : "GPS · SPEED ACQUIRING",
     });
   }
 

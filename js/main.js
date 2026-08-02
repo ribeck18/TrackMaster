@@ -22,7 +22,6 @@ import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js"
 import {
   adjustLapBoundaryIfAllowed,
   aggregateRunReport,
-  MAX_VALID_SPEED_INTERVAL_MS,
 } from "./core/report.js";
 import { createSessionRecorder } from "./core/session-recorder.js";
 import {
@@ -68,7 +67,8 @@ const bubble = spiritLevel.querySelector(".level__bubble");
 const unavailableLevel = spiritLevel.querySelector(".level__unavailable");
 const enableButton = document.querySelector('[data-action="enable"]');
 const accessOutcomeState = createAccessOutcomeState();
-const gpsSpeedometer = createGpsSpeedometer();
+const monotonicNow = globalThis.performance?.now?.bind(globalThis.performance) ?? Date.now;
+const gpsSpeedometer = createGpsSpeedometer({ nowRef: monotonicNow });
 const readySpeedValue = document.querySelector("[data-speed-value]");
 const readyGpsWarning = document.querySelector("[data-gps-warning]");
 const raceSpeedValue = document.querySelector("[data-race-speed-value]");
@@ -81,7 +81,6 @@ const saveButton = document.querySelector('[data-action="save-run"]');
 const saveStatus = document.querySelector("[data-save-status]");
 const zeroButton = document.querySelector('[data-action="zero"]');
 const calibrationStatus = document.querySelector("[data-calibration-status]");
-const monotonicNow = globalThis.performance?.now?.bind(globalThis.performance) ?? Date.now;
 const leanEstimator = assertLeanEstimator(createLeanEstimator({ nowRef: monotonicNow }));
 const calibrationWindow = createBikeFrameCalibrationWindow({ nowRef: monotonicNow });
 const readyLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-lean-instrument]"));
@@ -94,7 +93,6 @@ let currentState = "enable";
 let lastGyroReceivedAt = null;
 let motionGrantedAt = null;
 let latestPosition = null;
-let lastValidSpeedReceivedAt = null;
 let raceTiming = null;
 let raceStartedAtUnixMs = null;
 let completedSession = null;
@@ -205,17 +203,10 @@ function currentLean(now = monotonicNow()) {
 
 function liveSessionReading(now = monotonicNow()) {
   const speed = gpsSpeedometer.snapshot();
-  const speedAge = now - lastValidSpeedReceivedAt;
-  const speedValid =
-    speed.hasSpeed &&
-    latestPosition !== null &&
-    Number.isFinite(lastValidSpeedReceivedAt) &&
-    speedAge >= 0 &&
-    speedAge <= MAX_VALID_SPEED_INTERVAL_MS;
   return {
     position: latestPosition,
     speedMph: speed.hasSpeed ? speed.mph : null,
-    speedValid,
+    speedValid: speed.hasSpeed && latestPosition !== null,
     leanDegrees: currentLean(now),
   };
 }
@@ -239,9 +230,6 @@ function handleSensorSample(sample) {
     const kinematicSample = gpsSpeedometer.kinematicSample();
     latestPosition = positionForAcceptedLocation(sample, acceptedTimestamp, latestPosition);
     if (acceptedLocation) {
-      if (Number.isFinite(kinematicSample?.speedMps) && kinematicSample.speedMps >= 0) {
-        lastValidSpeedReceivedAt = monotonicNow();
-      }
       leanEstimator.update(kinematicSample);
     }
   } else {
@@ -292,7 +280,6 @@ function recoveryParagraph(text) {
 function applyAccessOutcomes(outcomes) {
   if (outcomes.location.status !== SENSOR_STATUS.GRANTED) {
     latestPosition = null;
-    lastValidSpeedReceivedAt = null;
     gpsSpeedometer.clearFix();
     leanEstimator.clearLocation();
   }

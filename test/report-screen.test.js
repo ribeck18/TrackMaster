@@ -79,11 +79,11 @@ test("SAVE seam receives the latest trimmed report and each ended report clears 
   assert.match(endBlock, /delete reportScreen\.dataset\.expandedLap;[\s\S]*?renderRunReport/);
 });
 
-test("recorded session readings carry explicit monotonic GPS freshness", () => {
-  assert.match(main, /let lastValidSpeedReceivedAt = null/);
-  assert.match(main, /aggregateRunReport,[\s\S]*?MAX_VALID_SPEED_INTERVAL_MS/);
-  assert.match(main, /Number\.isFinite\(lastValidSpeedReceivedAt\)[\s\S]*?speedAge <= MAX_VALID_SPEED_INTERVAL_MS/);
-  assert.match(main, /speedMph: speed\.hasSpeed \? speed\.mph : null,[\s\S]*?speedValid/);
+test("recorded session readings share the speedometer's monotonic freshness contract", () => {
+  assert.match(main, /createGpsSpeedometer\(\{ nowRef: monotonicNow \}\)/);
+  assert.match(main, /speedMph: speed\.hasSpeed \? speed\.mph : null,[\s\S]*?speedValid: speed\.hasSpeed && latestPosition !== null/);
+  assert.doesNotMatch(main, /lastValidSpeedReceivedAt|speedAge/);
+  assert.doesNotMatch(main, /MAX_VALID_SPEED_INTERVAL_MS/);
 });
 
 test("track map is a local vector control with styled trace, marker, and legible mode", () => {

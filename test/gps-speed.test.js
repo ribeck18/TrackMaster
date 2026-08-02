@@ -7,6 +7,7 @@ import {
   DEFAULT_GPS_VALIDATION_OPTIONS,
   deriveSpeedMetresPerSecond,
   GPS_SPEED_SOURCE,
+  MAXIMUM_GPS_FIX_AGE_MS,
   METRES_PER_SECOND_TO_MPH,
   isAcceptedLocationSample,
   positionForAcceptedLocation,
@@ -222,6 +223,67 @@ test("poor-accuracy stationary jitter is rejected and a credible fix recovers at
   assert.equal(speedometer.acceptedLocationTimestamp(), 2_000);
   assert.equal(speedometer.snapshot().mph, 0, "motion inside reported uncertainty stays stationary");
   assert.equal(speedometer.kinematicSample().evidenceSpeedMps, 0);
+});
+
+test("live speed expires on the monotonic deadline, ignores rejected refreshes, and recovers", () => {
+  let now = 100;
+  const speedometer = createGpsSpeedometer({
+    smoothingFactor: 1,
+    nowRef: () => now,
+  });
+
+  assert.deepEqual(speedometer.snapshot(), {
+    hasFix: false,
+    hasSpeed: false,
+    mph: null,
+    source: null,
+    warning: "GPS · NO FIX",
+  });
+
+  speedometer.handle(fix({ timestamp: 1_000, longitude: 0, speed: 10 }));
+  now += MAXIMUM_GPS_FIX_AGE_MS;
+  assert.equal(speedometer.snapshot().mph, 22, "the exact deadline remains fresh");
+  assert.equal(speedometer.snapshot().warning, "");
+
+  now += 1;
+  assert.deepEqual(speedometer.snapshot(), {
+    hasFix: true,
+    hasSpeed: false,
+    mph: null,
+    source: null,
+    warning: "GPS · STALE",
+  });
+
+  speedometer.handle(fix({ timestamp: 2_000, longitude: 0.0001, speed: 1_000 }));
+  assert.equal(speedometer.acceptedLocationTimestamp(), null);
+  assert.equal(speedometer.snapshot().warning, "GPS · STALE", "an outlier cannot refresh reception age");
+
+  now += 100;
+  speedometer.handle(fix({ timestamp: 3_000, longitude: 0.00036, speed: 20 }));
+  assert.equal(speedometer.snapshot().mph, 45);
+  assert.equal(speedometer.snapshot().warning, "", "the next accepted fix recovers live output");
+
+  speedometer.handle({
+    type: "access",
+    sensor: "location",
+    outcome: { status: "unavailable", reason: "signal lost" },
+  });
+  assert.deepEqual(speedometer.snapshot(), {
+    hasFix: false,
+    hasSpeed: false,
+    mph: null,
+    source: null,
+    warning: "GPS · NO FIX",
+  });
+
+  now += 100;
+  speedometer.handle(fix({ timestamp: 4_000, longitude: 0.00045, speed: 10 }));
+  assert.equal(speedometer.snapshot().mph, 22, "access loss does not prevent later recovery");
+});
+
+test("live freshness options validate the clock and deadline", () => {
+  assert.throws(() => createGpsSpeedometer({ maximumAgeMs: 0 }), /positive finite number/);
+  assert.throws(() => createGpsSpeedometer({ nowRef: null }), /clock must be a function/);
 });
 
 test("the motorcycle speed ceiling still admits a consistent 179 MPH track fix", () => {
