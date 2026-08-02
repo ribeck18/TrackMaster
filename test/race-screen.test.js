@@ -51,6 +51,18 @@ test("race actions use native click semantics, reject transition double-taps, an
   );
 });
 
+test("an awaited SAVE result cannot mark a replacement session exported", () => {
+  const saveBlock = main.slice(
+    main.indexOf("saveButton.addEventListener"),
+    main.indexOf("[data-action=\"continue-limited\"]"),
+  );
+  assert.match(saveBlock, /const sessionBeingSaved = completedSession/);
+  assert.match(saveBlock, /runStore\.save\(sessionBeingSaved\.report\)/);
+  assert.match(saveBlock, /if \(completedSession !== sessionBeingSaved\) return/);
+  assert.match(saveBlock, /\.\.\.sessionBeingSaved, exported: true/);
+  assert.doesNotMatch(saveBlock, /\.\.\.completedSession, exported: true/);
+});
+
 test("derived session capture and dev raw recording remain separate", () => {
   assert.match(main, /const sessionRecorder = createSessionRecorder/);
   assert.match(main, /const rawRecorder = exportRawRecording \? createRawSensorRecorder/);
@@ -60,7 +72,8 @@ test("derived session capture and dev raw recording remain separate", () => {
   assert.match(main, /positionForAcceptedLocation\(sample, acceptedTimestamp, latestPosition\)/);
   assert.match(main, /if \(sample\.type === "location" && !acceptedLocation\) return/);
   assert.match(main, /force: acceptedLocation/);
-  assert.match(main, /completedSession = Object\.freeze\(\{ timing: raceTiming, samples: recordedSession\.samples \}\)/);
-  assert.match(html, /data-report-handoff>Session data is ready for the report/);
-  assert.doesNotMatch(html, /MAX SPEED|AVG SPEED|TRACK · TOP SPEED POINT/);
+  assert.match(main, /aggregateRunReport\([\s\S]*?timing: raceTiming, samples: recordedSession\.samples/);
+  assert.match(main, /completedSession = Object\.freeze\(\{ report, exported: false \}\)/);
+  assert.match(main, /renderRunReport\(reportScreen, report\)/);
+  assert.match(html, /MAX SPEED|AVG SPEED|TRACK · TOP SPEED POINT/);
 });

@@ -1,6 +1,6 @@
 # Apex Lap Tracker
 
-Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. The current app provides the forced-landscape shell, the Enable Sensors → Calibrate → Ready → Race flow, live speed and fused lean instruments, monotonic tap-to-lap timing, full-session sample capture, race wake lock, and a raw sensor simulator/record/replay harness. Reports and offline installation remain separate later issues.
+Apex is a zero-dependency, client-side motorcycle track-day instrument designed for a bar-mounted iPhone. The current app provides the forced-landscape shell, the Enable Sensors → Calibrate → Ready → Race → Report flow, live speed and fused lean instruments, monotonic tap-to-lap timing, immutable run aggregation, full-session sample capture, race wake lock, and a raw sensor simulator/record/replay harness. Offline installation remains a later issue.
 
 ## Run locally
 
@@ -34,6 +34,12 @@ Recording uses RAM only. Export uses the Web Share API or an in-memory Blob down
 
 At the browser seam, `DeviceMotionEvent.rotationRate` is normalized from `alpha/beta/gamma` to explicit device `x/y/z`. The pure-math estimator integrates body roll for tip-in response, recovers world yaw from the physically rotated leaned body-rate vector, and complements it with the drift-free `atan(speed × yawRate / g)` anchor using the same platform-or-derived speed as the speedometer. Refinement uses a separate unsmoothed validated speed while the instrument and kinematic anchor retain their prior smoothing. GPS trust rejects reordered timestamps and expires by monotonic reception age without comparing GPS epoch time to `performance.now()`. The estimator remains gyro-only through GPS gaps, learns changing stationary gyro bias as a device-frame three-vector, slowly returns verified stationary lean to upright, and clamps signed output to ±60°. A missing or stalled gyro renders lean `N/A`; estimation still runs at sensor cadence while instrument DOM writes are capped at 5 Hz.
 
+## Run reports
+
+Ending a race freezes a detached report snapshot from that ended session's monotonic samples. It lists every completed lap and tied best lap, computes max speed and a trapezoidal time-weighted average only across explicitly fresh GPS intervals, keeps left/right lean maxima separate, and retains the top-speed sample's validated position, normalized monotonic timestamp, and lap context. A lone speed sample or silent GPS gap cannot invent average coverage; valid stationary fixes still contribute their full measured time. Without any valid coordinate fix all GPS-derived figures are unavailable. Missing sensor data and sessions with no completed laps render explicit empty states rather than fabricated zeroes.
+
+`RUN n` is an in-memory counter and resets on reload. `NEW RUN` confirms before discarding an unexported report. `SAVE RUN` currently stops at the single `RunStore.save(report)` seam; JSON/GPX sharing is issue #11. The report model already reserves nullable `runId` and `riderId`. The track column is an explicit placeholder until issue #10 projects the retained location samples and top-speed point.
+
 ## Deploy with GitHub Pages
 
 GitHub Pages provides the HTTPS origin required by iPhone sensor permissions.
@@ -61,4 +67,4 @@ All repository-owned assets use document-relative paths (`./css/...`, `./js/...`
 
 ## Current scope
 
-The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready renders smoothed live GPS speed in MPH, and Ready and Race render the same fused lean and speed sources. Race records timestamped position/speed/lean instrument samples at up to 20 Hz while retaining accepted native GPS fixes between instrument ticks; duplicate GPS bursts are coalesced. It marks laps from full-screen taps, keeps the display awake, and hands the completed timing and samples to the minimal Report transition. Detailed report UI behavior belongs to issue #8.
+The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready renders smoothed live GPS speed in MPH, and Ready and Race render the same fused lean and speed sources. Race records timestamped position/speed/lean instrument samples at up to 20 Hz while retaining accepted native GPS fixes between instrument ticks; duplicate GPS bursts are coalesced. It marks laps from full-screen taps, keeps the display awake, and renders the completed immutable summary in the dense Report layout. Track plotting, JSON/GPX run export, offline installation, and persistence remain separate later issues.

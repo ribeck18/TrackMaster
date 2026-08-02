@@ -13,6 +13,7 @@ function createSample(reading, timestamp, startedAt) {
     latitude: finiteOrNull(position?.latitude),
     longitude: finiteOrNull(position?.longitude),
     speedMph: finiteOrNull(reading.speedMph),
+    speedValid: reading.speedValid === true,
     leanDegrees: finiteOrNull(reading.leanDegrees),
   };
 }

@@ -9,10 +9,11 @@ test("session recorder keeps timestamped position, speed, and lean readings", ()
   assert.equal(recorder.record({
     position: { latitude: 37.42, longitude: -122.08 },
     speedMph: 87,
+    speedValid: true,
     leanDegrees: -42.25,
   }, 1_000), true);
-  assert.equal(recorder.record({ speedMph: 88, leanDegrees: -43 }, 1_020), false);
-  assert.equal(recorder.record({ speedMph: 88, leanDegrees: -43 }, 1_020, { force: true }), true);
+  assert.equal(recorder.record({ speedMph: 88, speedValid: false, leanDegrees: -43 }, 1_020), false);
+  assert.equal(recorder.record({ speedMph: 88, speedValid: false, leanDegrees: -43 }, 1_020, { force: true }), true);
 
   const session = recorder.stop(2_000);
   assert.deepEqual(session.samples[0], {
@@ -21,6 +22,7 @@ test("session recorder keeps timestamped position, speed, and lean readings", ()
     latitude: 37.42,
     longitude: -122.08,
     speedMph: 87,
+    speedValid: true,
     leanDegrees: -42.25,
   });
   assert.deepEqual(session.samples[1], {
@@ -29,6 +31,7 @@ test("session recorder keeps timestamped position, speed, and lean readings", ()
     latitude: null,
     longitude: null,
     speedMph: 88,
+    speedValid: false,
     leanDegrees: -43,
   });
   assert.equal(recorder.record({}, 2_100), false);

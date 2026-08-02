@@ -157,12 +157,65 @@
         </div>
       </section>
 
-      <section class="screen placeholder-screen" data-screen="report" aria-labelledby="report-title" hidden>
-        <div class="placeholder-content">
-          <p class="eyebrow">SESSION COMPLETE</p>
-          <h1 id="report-title" tabindex="-1">RUN REPORT</h1>
-          <p class="screen-copy" data-report-handoff>Session data is ready for the report.</p>
-          <button class="secondary-button" type="button" data-action="new-run">NEW RUN</button>
+      <section class="screen report-screen" data-screen="report" aria-labelledby="report-title" hidden>
+        <div class="report-layout">
+          <header class="report-header">
+            <div class="report-heading">
+              <h1 id="report-title" tabindex="-1">RUN REPORT</h1>
+              <p data-report-meta>RUN 1 · 0 LAPS · 00:00.0 TOTAL</p>
+            </div>
+            <p class="report-best" data-report-best>BEST --:--.-</p>
+          </header>
+
+          <div class="report-body">
+            <section class="report-column report-laps-column" aria-labelledby="lap-times-title">
+              <h2 id="lap-times-title" class="report-eyebrow">LAP TIMES</h2>
+              <div class="report-laps" data-report-laps>
+                <p class="report-empty">NO COMPLETED LAPS</p>
+              </div>
+            </section>
+
+            <section class="report-column" aria-label="Run statistics">
+              <h2 class="report-eyebrow">RUN STATS</h2>
+              <div class="report-stat-grid">
+                <article class="report-stat">
+                  <p>MAX SPEED</p>
+                  <div><output data-report-max-speed>--</output><span> MPH</span></div>
+                </article>
+                <article class="report-stat">
+                  <p>AVG SPEED</p>
+                  <div><output data-report-avg-speed>--</output><span> MPH</span></div>
+                </article>
+                <article class="report-stat report-stat--accent">
+                  <p>MAX LEAN · LEFT</p>
+                  <output data-report-left-lean>--</output>
+                </article>
+                <article class="report-stat report-stat--accent">
+                  <p>MAX LEAN · RIGHT</p>
+                  <output data-report-right-lean>--</output>
+                </article>
+              </div>
+            </section>
+
+            <section class="report-column report-track-column" aria-labelledby="track-title">
+              <h2 id="track-title" class="report-eyebrow">TRACK · TOP SPEED POINT</h2>
+              <div class="report-map" data-report-map data-location="unavailable">
+                <span class="report-map__stripe" aria-hidden="true"></span>
+                <span class="report-map__marker" data-top-speed-marker hidden aria-hidden="true"></span>
+                <p data-map-state>NO LOCATION DATA</p>
+              </div>
+              <div class="top-speed-card">
+                <output data-top-speed>-- MPH</output>
+                <p data-top-speed-context>NO SPEED DATA</p>
+              </div>
+            </section>
+          </div>
+
+          <footer class="report-footer">
+            <p class="save-status" data-save-status aria-live="polite"></p>
+            <button class="secondary-button" type="button" data-action="new-run">NEW RUN</button>
+            <button class="save-button" type="button" data-action="save-run">SAVE RUN</button>
+          </footer>
         </div>
       </section>
 

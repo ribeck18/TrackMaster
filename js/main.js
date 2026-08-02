@@ -15,10 +15,10 @@ import {
   currentLapElapsed,
   endLapTiming,
   formatLapTime,
-  sessionElapsed,
   startLapTiming,
 } from "./core/lap-timing.js";
 import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js";
+import { aggregateRunReport, MAX_VALID_SPEED_INTERVAL_MS } from "./core/report.js";
 import { createSessionRecorder } from "./core/session-recorder.js";
 import {
   isRawRecorderExportEnabled,
@@ -30,6 +30,7 @@ import { createBrowserSensorSource, SENSOR_STATUS } from "./sensors/sensor-sourc
 import { calculateBubbleOffset } from "./sensors/spirit-level.js";
 import { createRaceWakeLock } from "./sensors/wake-lock.js";
 import { createLeanGaugeRenderer } from "./ui/lean-gauge.js";
+import { renderRunReport } from "./ui/run-report.js";
 
 const screens = new Map(
   [...document.querySelectorAll("[data-screen]")].map((screen) => [
@@ -59,7 +60,9 @@ const raceGpsWarning = document.querySelector("[data-race-gps-warning]");
 const raceTime = document.querySelector("[data-race-time]");
 const lapNumber = document.querySelector("[data-lap-number]");
 const lastLap = document.querySelector("[data-last-lap]");
-const reportHandoff = document.querySelector("[data-report-handoff]");
+const reportScreen = document.querySelector('[data-screen="report"]');
+const saveButton = document.querySelector('[data-action="save-run"]');
+const saveStatus = document.querySelector("[data-save-status]");
 const zeroButton = document.querySelector('[data-action="zero"]');
 const calibrationStatus = document.querySelector("[data-calibration-status]");
 const monotonicNow = globalThis.performance?.now?.bind(globalThis.performance) ?? Date.now;
@@ -69,15 +72,24 @@ const readyLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-lea
 const raceLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-race-lean-instrument]"));
 const sessionRecorder = createSessionRecorder({ nowRef: monotonicNow });
 const raceWakeLock = createRaceWakeLock();
+// Issue #11 replaces this one-method seam with JSON/GPX sharing. Returning true
+// is the only signal that NEW RUN may discard without confirmation.
+const runStore = Object.freeze({
+  async save(_report) {
+    return false;
+  },
+});
 
 let currentState = "enable";
 let lastGyroReceivedAt = null;
 let motionGrantedAt = null;
 let latestPosition = null;
+let lastValidSpeedReceivedAt = null;
 let raceTiming = null;
 let completedSession = null;
 let raceTimer = null;
 let lastLapActivationAt = Number.NEGATIVE_INFINITY;
+let runCount = 0;
 
 const MINIMUM_LAP_ACTIVATION_INTERVAL_MS = 500;
 
@@ -147,9 +159,17 @@ function currentLean(now = monotonicNow()) {
 
 function liveSessionReading(now = monotonicNow()) {
   const speed = gpsSpeedometer.snapshot();
+  const speedAge = now - lastValidSpeedReceivedAt;
+  const speedValid =
+    speed.hasSpeed &&
+    latestPosition !== null &&
+    Number.isFinite(lastValidSpeedReceivedAt) &&
+    speedAge >= 0 &&
+    speedAge <= MAX_VALID_SPEED_INTERVAL_MS;
   return {
     position: latestPosition,
     speedMph: speed.hasSpeed ? speed.mph : null,
+    speedValid,
     leanDegrees: currentLean(now),
   };
 }
@@ -172,7 +192,12 @@ function handleSensorSample(sample) {
     acceptedLocation = isAcceptedLocationSample(sample, acceptedTimestamp);
     const kinematicSample = gpsSpeedometer.kinematicSample();
     latestPosition = positionForAcceptedLocation(sample, acceptedTimestamp, latestPosition);
-    if (acceptedLocation) leanEstimator.update(kinematicSample);
+    if (acceptedLocation) {
+      if (Number.isFinite(kinematicSample?.speedMps) && kinematicSample.speedMps >= 0) {
+        lastValidSpeedReceivedAt = monotonicNow();
+      }
+      leanEstimator.update(kinematicSample);
+    }
   } else {
     gpsSpeedometer.handle(sample);
   }
@@ -221,6 +246,7 @@ function recoveryParagraph(text) {
 function applyAccessOutcomes(outcomes) {
   if (outcomes.location.status !== SENSOR_STATUS.GRANTED) {
     latestPosition = null;
+    lastValidSpeedReceivedAt = null;
     gpsSpeedometer.clearFix();
     leanEstimator.clearLocation();
   }
@@ -388,6 +414,7 @@ document.querySelector('[data-action="start-race"]').addEventListener("click", (
   const now = monotonicNow();
   lastLapActivationAt = now;
   raceTiming = startLapTiming(now);
+  runCount += 1;
   completedSession = null;
   lapNumber.textContent = "1";
   lastLap.textContent = "--:--.-";
@@ -423,8 +450,12 @@ document.querySelector('[data-action="end-race"]').addEventListener("click", (ev
   raceTiming = endLapTiming(raceTiming, now);
   sessionRecorder.record(liveSessionReading(now), now, { force: true });
   const recordedSession = sessionRecorder.stop(now);
-  completedSession = Object.freeze({ timing: raceTiming, samples: recordedSession.samples });
-  reportHandoff.textContent = `${raceTiming.laps.length} completed laps · ${formatLapTime(sessionElapsed(raceTiming))} total · ${recordedSession.samples.length} samples ready`;
+  const report = aggregateRunReport(
+    { timing: raceTiming, samples: recordedSession.samples },
+    { runNumber: runCount, runId: null, riderId: null },
+  );
+  completedSession = Object.freeze({ report, exported: false });
+  renderRunReport(reportScreen, report);
   stopRaceTimer();
   void raceWakeLock.stop();
 
@@ -436,9 +467,40 @@ document.querySelector('[data-action="end-race"]').addEventListener("click", (ev
 });
 
 document.querySelector('[data-action="new-run"]').addEventListener("click", () => {
+  if (
+    completedSession &&
+    !completedSession.exported &&
+    !window.confirm("This run has not been exported. Discard it and start a new run?")
+  ) {
+    return;
+  }
   raceTiming = null;
   completedSession = null;
   dispatch("NEW_RUN");
+});
+
+saveButton.addEventListener("click", async () => {
+  if (currentState !== "report" || !completedSession) return;
+  const sessionBeingSaved = completedSession;
+  saveButton.disabled = true;
+  saveStatus.textContent = "PREPARING EXPORT…";
+  try {
+    const exported = await runStore.save(sessionBeingSaved.report);
+    if (completedSession !== sessionBeingSaved) return;
+    if (exported) {
+      completedSession = Object.freeze({ ...sessionBeingSaved, exported: true });
+      saveStatus.textContent = "RUN EXPORTED";
+    } else {
+      saveStatus.textContent = "EXPORT NOT AVAILABLE IN THIS BUILD";
+    }
+  } catch (error) {
+    console.error("Run export failed.", error);
+    if (completedSession === sessionBeingSaved) {
+      saveStatus.textContent = "EXPORT FAILED · RUN RETAINED";
+    }
+  } finally {
+    saveButton.disabled = false;
+  }
 });
 
 document.querySelector('[data-action="continue-limited"]').addEventListener("click", () => {

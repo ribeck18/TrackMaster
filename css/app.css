@@ -680,6 +680,293 @@ h1 {
   text-shadow: 0 0 40px rgba(182, 255, 46, 0.35);
 }
 
+.report-screen {
+  padding:
+    max(20px, var(--safe-block-start))
+    max(34px, var(--safe-inline-end))
+    max(18px, var(--safe-block-end))
+    max(60px, var(--safe-inline-start));
+}
+
+.report-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.report-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.report-heading h1 {
+  font-size: 30px;
+}
+
+.report-heading p,
+.report-best,
+.report-eyebrow,
+.report-empty,
+.report-stat p,
+.report-stat span,
+.report-map p,
+.top-speed-card p,
+.save-status {
+  margin: 0;
+  font-family: "Space Mono", monospace;
+  text-transform: uppercase;
+}
+
+.report-heading p,
+.report-best {
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+
+.report-heading p {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.report-best {
+  color: var(--accent);
+}
+
+.report-body {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 1fr 1.15fr 1.1fr;
+  gap: 22px;
+}
+
+.report-column {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-eyebrow {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 2px;
+}
+
+.report-laps {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.report-lap {
+  display: flex;
+  min-height: 42px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.report-lap span {
+  font-family: "Space Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.report-lap output {
+  font-family: "Rajdhani", sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-lap--best {
+  border-color: rgba(182, 255, 46, 0.4);
+  background: rgba(182, 255, 46, 0.1);
+  color: var(--accent);
+}
+
+.report-empty {
+  display: grid;
+  min-height: 58px;
+  place-items: center;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.report-stat-grid {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.report-stat {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: center;
+  padding: 11px 14px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.report-stat p {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
+.report-stat div,
+.report-stat > output {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.report-stat output {
+  color: inherit;
+  font-family: "Rajdhani", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-stat span {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.report-stat--accent > output {
+  color: var(--accent);
+}
+
+.report-map {
+  position: relative;
+  display: grid;
+  min-height: 70px;
+  flex: 1;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 11px;
+  background: #101210;
+}
+
+.report-map__stripe {
+  position: absolute;
+  inset: 0;
+  opacity: 0.28;
+  background: repeating-linear-gradient(
+    -35deg,
+    transparent 0 15px,
+    rgba(255, 255, 255, 0.08) 15px 17px
+  );
+}
+
+.report-map p {
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.report-map__marker {
+  position: absolute;
+  z-index: 2;
+  top: 38%;
+  left: 62%;
+  width: 12px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 15px rgba(182, 255, 46, 0.75);
+}
+
+.top-speed-card {
+  padding: 9px 12px;
+  border: 1px solid rgba(182, 255, 46, 0.3);
+  border-radius: 9px;
+  background: rgba(182, 255, 46, 0.1);
+}
+
+.top-speed-card output {
+  color: var(--accent);
+  font-family: "Rajdhani", sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.top-speed-card p {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.report-footer {
+  display: flex;
+  min-height: 42px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.save-status {
+  margin-right: auto;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.save-button {
+  padding: 11px 34px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 30px;
+  background: var(--accent);
+  box-shadow: 0 0 24px rgba(182, 255, 46, 0.3);
+  color: #0a0b0d;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.save-button:focus-visible {
+  outline: 3px solid var(--text);
+  outline-offset: 4px;
+}
+
 .tap-prompt {
   color: var(--accent);
   font-size: clamp(10px, 2.9vmin, 13px);
@@ -867,6 +1154,91 @@ noscript {
 
   .timer-divider {
     height: 24px;
+  }
+
+  .report-screen {
+    padding: max(10px, var(--safe-block-start)) max(16px, var(--safe-inline-end)) max(8px, var(--safe-block-end)) max(28px, var(--safe-inline-start));
+  }
+
+  .report-layout {
+    gap: 7px;
+  }
+
+  .report-header {
+    padding-bottom: 5px;
+  }
+
+  .report-heading h1 {
+    font-size: 23px;
+  }
+
+  .report-heading p,
+  .report-best {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+
+  .report-body {
+    gap: 9px;
+  }
+
+  .report-eyebrow,
+  .report-stat p {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+
+  .report-lap {
+    min-height: 32px;
+    padding: 4px 7px;
+  }
+
+  .report-lap span {
+    font-size: 8px;
+  }
+
+  .report-lap output {
+    font-size: 17px;
+  }
+
+  .report-stat-grid {
+    gap: 5px;
+  }
+
+  .report-stat {
+    padding: 6px 8px;
+  }
+
+  .report-stat div,
+  .report-stat > output {
+    font-size: 28px;
+  }
+
+  .report-stat span {
+    font-size: 10px;
+  }
+
+  .report-map p,
+  .top-speed-card p {
+    font-size: 7px;
+  }
+
+  .top-speed-card {
+    padding: 5px 8px;
+  }
+
+  .top-speed-card output {
+    font-size: 16px;
+  }
+
+  .report-footer {
+    min-height: 34px;
+  }
+
+  .report-footer .secondary-button,
+  .save-button {
+    padding: 8px 18px;
+    font-size: 12px;
   }
 }
 
