@@ -5,6 +5,17 @@ export const GPS_SPEED_SOURCE = Object.freeze({
   PLATFORM: "platform",
   DERIVED: "derived",
 });
+/**
+ * Shared live/report/lean location policy. The 100 m/s ceiling is about 224
+ * MPH, above the tested 179 MPH track case; the remaining limits reject poor
+ * fixes and platform-speed/coordinate disagreement without an acceleration
+ * gate that would delay recovery after an outlier.
+ */
+export const DEFAULT_GPS_VALIDATION_OPTIONS = Object.freeze({
+  maximumSpeedMps: 100,
+  maximumHorizontalAccuracyMetres: 25,
+  maximumSpeedDisagreementMps: 30,
+});
 
 function isValidCoordinate(latitude, longitude) {
   return (
@@ -94,12 +105,28 @@ export function deriveSpeedMetresPerSecond(previous, current) {
  * value. Location fixes are processed at their native cadence; consumers can
  * render snapshot() on a ~5 Hz timer without exposing raw GPS jitter.
  */
-export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresisMph = 0.75 } = {}) {
+export function createGpsSpeedometer({
+  smoothingFactor = 0.35,
+  integerHysteresisMph = 0.75,
+  maximumSpeedMps = DEFAULT_GPS_VALIDATION_OPTIONS.maximumSpeedMps,
+  maximumHorizontalAccuracyMetres =
+    DEFAULT_GPS_VALIDATION_OPTIONS.maximumHorizontalAccuracyMetres,
+  maximumSpeedDisagreementMps = DEFAULT_GPS_VALIDATION_OPTIONS.maximumSpeedDisagreementMps,
+} = {}) {
   if (!Number.isFinite(smoothingFactor) || smoothingFactor <= 0 || smoothingFactor > 1) {
     throw new RangeError("GPS smoothing factor must be in the range (0, 1].");
   }
   if (!Number.isFinite(integerHysteresisMph) || integerHysteresisMph < 0.5) {
     throw new RangeError("GPS integer hysteresis must be at least 0.5 MPH.");
+  }
+  for (const [name, value] of Object.entries({
+    maximumSpeedMps,
+    maximumHorizontalAccuracyMetres,
+    maximumSpeedDisagreementMps,
+  })) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new RangeError(`${name} must be a positive finite number.`);
+    }
   }
 
   let previousPosition = null;
@@ -141,12 +168,14 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
     if (
       !isValidCoordinate(sample.latitude, sample.longitude) ||
       !Number.isFinite(sample.timestamp) ||
+      !Number.isFinite(sample.accuracy) ||
+      sample.accuracy < 0 ||
+      sample.accuracy > maximumHorizontalAccuracyMetres ||
       (previousPosition !== null && sample.timestamp <= previousPosition.timestamp)
     ) {
       return false;
     }
 
-    hasFix = true;
     let metresPerSecond = null;
     let source = null;
 
@@ -160,6 +189,34 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
       if (metresPerSecond !== null) source = GPS_SPEED_SOURCE.DERIVED;
     }
 
+    if (metresPerSecond !== null && metresPerSecond > maximumSpeedMps) return false;
+
+    if (previousPosition !== null) {
+      const elapsedSeconds = (sample.timestamp - previousPosition.timestamp) / 1_000;
+      const displacement = distanceMetres(previousPosition, sample);
+      const displacementSpeed = displacement / elapsedSeconds;
+      if (displacementSpeed > maximumSpeedMps) return false;
+
+      const uncertaintyMetres = previousPosition.accuracy + sample.accuracy;
+      if (
+        source === GPS_SPEED_SOURCE.PLATFORM &&
+        Math.abs(displacement - metresPerSecond * elapsedSeconds) >
+          uncertaintyMetres + maximumSpeedDisagreementMps * elapsedSeconds
+      ) {
+        return false;
+      }
+
+      // With no native speed, displacement contained entirely inside the two
+      // horizontal-accuracy radii is stationary rather than invented motion.
+      if (source === GPS_SPEED_SOURCE.DERIVED && displacement <= uncertaintyMetres) {
+        metresPerSecond = 0;
+      }
+    }
+
+    // This is the sole acceptance point. All live/report/lean state changes
+    // happen below it, so rejected fixes leave the last credible baseline
+    // intact and the next credible fix can recover without an acceleration gate.
+    hasFix = true;
     const derivedHeading = previousPosition === null
       ? null
       : bearingDegrees(previousPosition, sample);
@@ -168,11 +225,12 @@ export function createGpsSpeedometer({ smoothingFactor = 0.35, integerHysteresis
       : derivedHeading;
     courseHeadingDegrees = derivedHeading;
     evidenceSpeedMps = metresPerSecond;
-    accuracy = Number.isFinite(sample.accuracy) && sample.accuracy >= 0 ? sample.accuracy : null;
+    accuracy = sample.accuracy;
     previousPosition = {
       timestamp: sample.timestamp,
       latitude: sample.latitude,
       longitude: sample.longitude,
+      accuracy: sample.accuracy,
     };
 
     if (metresPerSecond === null) return true;

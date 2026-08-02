@@ -4,19 +4,28 @@ import assert from "node:assert/strict";
 import {
   bearingDegrees,
   createGpsSpeedometer,
+  DEFAULT_GPS_VALIDATION_OPTIONS,
   deriveSpeedMetresPerSecond,
   GPS_SPEED_SOURCE,
   METRES_PER_SECOND_TO_MPH,
   isAcceptedLocationSample,
   positionForAcceptedLocation,
 } from "../js/core/gps-speed.js";
+import { createLeanEstimator } from "../js/core/lean-estimator.js";
 import { createRawSensorLog } from "../js/core/raw-sensor-log.js";
 import { createSessionRecorder } from "../js/core/session-recorder.js";
 import { createReplaySensorSource } from "../js/dev/replay.js";
 import { createSyntheticSensorSource } from "../js/dev/simulator.js";
 
-function fix({ timestamp = 0, latitude = 0, longitude = 0, speed = null } = {}) {
-  return { type: "location", timestamp, latitude, longitude, accuracy: 3, speed, heading: null };
+function fix({
+  timestamp = 0,
+  latitude = 0,
+  longitude = 0,
+  accuracy = 3,
+  speed = null,
+  heading = null,
+} = {}) {
+  return { type: "location", timestamp, latitude, longitude, accuracy, speed, heading };
 }
 
 function metresPerSecond(mph) {
@@ -47,7 +56,7 @@ function manualTimers() {
 test("platform speed is preferred and converted from metres/second to whole MPH", () => {
   const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
   speedometer.handle(fix({ timestamp: 0, longitude: 0, speed: 10 }));
-  speedometer.handle(fix({ timestamp: 1_000, longitude: 0.01, speed: 10 }));
+  speedometer.handle(fix({ timestamp: 1_000, longitude: 0.00009, speed: 10 }));
 
   assert.deepEqual(speedometer.snapshot(), {
     hasFix: true,
@@ -97,8 +106,8 @@ test("report position changes only with the exact timestamp accepted for speed",
   assert.deepEqual(position, { latitude: 10, longitude: 20, timestamp: 1_000 });
   assert.equal(speedometer.snapshot().mph, 22, "duplicate timestamps are not mistaken for acceptance");
 
-  handle(fix({ timestamp: 2_000, latitude: 11, longitude: 21, speed: 20 }));
-  assert.deepEqual(position, { latitude: 11, longitude: 21, timestamp: 2_000 });
+  handle(fix({ timestamp: 2_000, latitude: 10, longitude: 20.0002, speed: 20 }));
+  assert.deepEqual(position, { latitude: 10, longitude: 20.0002, timestamp: 2_000 });
   assert.equal(speedometer.snapshot().mph, 45);
 });
 
@@ -130,6 +139,113 @@ test("null and non-finite rejected fixes feed neither lean nor forced session ca
   assert.deepEqual(position, { latitude: 10, longitude: 20, timestamp: 1_000 });
   assert.equal(speedometer.snapshot().mph, 22);
   recorder.stop(40);
+});
+
+test("finite platform outliers reach neither report capture nor the lean anchor and recover", () => {
+  const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
+  const estimator = createLeanEstimator({ nowRef: () => 0 });
+  estimator.calibrate({ x: 0, y: 0, z: 9.80665 });
+  const recorder = createSessionRecorder();
+  recorder.start(0);
+  let position = null;
+
+  function integrate(sample, captureTimestamp) {
+    speedometer.handle(sample);
+    const acceptedTimestamp = speedometer.acceptedLocationTimestamp();
+    position = positionForAcceptedLocation(sample, acceptedTimestamp, position);
+    if (!isAcceptedLocationSample(sample, acceptedTimestamp)) return;
+    estimator.update(speedometer.kinematicSample());
+    recorder.record({
+      position,
+      speedMph: speedometer.snapshot().mph,
+      speedValid: speedometer.snapshot().hasSpeed,
+      leanDegrees: estimator.snapshot().leanDegrees,
+    }, captureTimestamp, { force: true });
+  }
+
+  integrate(fix({ timestamp: 1_000, longitude: 0, speed: 10 }), 0);
+  const acceptedKinematic = speedometer.kinematicSample();
+  const acceptedLean = estimator.snapshot();
+  integrate(fix({ timestamp: 2_000, longitude: 0.0001, speed: 1_000 }), 10);
+
+  assert.equal(speedometer.acceptedLocationTimestamp(), null);
+  assert.equal(speedometer.snapshot().mph, 22, "the live display retains the credible speed");
+  assert.deepEqual(speedometer.kinematicSample(), acceptedKinematic);
+  assert.deepEqual(estimator.snapshot(), acceptedLean, "the lean anchor is not refreshed");
+  assert.deepEqual(position, { latitude: 0, longitude: 0, timestamp: 1_000 });
+  assert.equal(recorder.sampleCount(), 1, "the rejected fix cannot force report capture");
+
+  integrate(fix({ timestamp: 3_000, longitude: 0.00036, speed: 20 }), 20);
+  const session = recorder.stop(40);
+  assert.equal(speedometer.acceptedLocationTimestamp(), 3_000);
+  assert.equal(speedometer.snapshot().mph, 45);
+  assert.equal(session.samples.length, 2);
+  assert.deepEqual(
+    session.samples.map(({ locationTimestamp, speedMph }) => ({ locationTimestamp, speedMph })),
+    [
+      { locationTimestamp: 1_000, speedMph: 22 },
+      { locationTimestamp: 3_000, speedMph: 45 },
+    ],
+  );
+});
+
+test("derived teleports are rejected without poisoning prompt recovery", () => {
+  const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
+  speedometer.handle(fix({ timestamp: 0, longitude: 0 }));
+  const baseline = speedometer.kinematicSample();
+
+  speedometer.handle(fix({ timestamp: 1_000, longitude: 0.01 }));
+  assert.equal(speedometer.acceptedLocationTimestamp(), null);
+  assert.deepEqual(speedometer.kinematicSample(), baseline);
+  assert.equal(speedometer.snapshot().hasSpeed, false);
+
+  speedometer.handle(fix({ timestamp: 2_000, longitude: 0.0002 }));
+  assert.equal(speedometer.acceptedLocationTimestamp(), 2_000);
+  assert.equal(speedometer.snapshot().mph, 25);
+  assert.equal(speedometer.snapshot().source, GPS_SPEED_SOURCE.DERIVED);
+});
+
+test("poor-accuracy stationary jitter is rejected and a credible fix recovers at zero", () => {
+  const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
+  speedometer.handle(fix({ timestamp: 0, longitude: 0, speed: 0 }));
+
+  speedometer.handle(fix({
+    timestamp: 1_000,
+    longitude: 0.0001,
+    accuracy: DEFAULT_GPS_VALIDATION_OPTIONS.maximumHorizontalAccuracyMetres + 1,
+  }));
+  assert.equal(speedometer.acceptedLocationTimestamp(), null);
+  assert.equal(speedometer.snapshot().mph, 0);
+  assert.equal(speedometer.kinematicSample().timestamp, 0);
+
+  speedometer.handle(fix({ timestamp: 2_000, longitude: 0.00001 }));
+  assert.equal(speedometer.acceptedLocationTimestamp(), 2_000);
+  assert.equal(speedometer.snapshot().mph, 0, "motion inside reported uncertainty stays stationary");
+  assert.equal(speedometer.kinematicSample().evidenceSpeedMps, 0);
+});
+
+test("the motorcycle speed ceiling still admits a consistent 179 MPH track fix", () => {
+  const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
+  const speedMps = metresPerSecond(179);
+  const longitudeDelta = (speedMps / 6_371_000) * (180 / Math.PI);
+  assert.ok(speedMps < DEFAULT_GPS_VALIDATION_OPTIONS.maximumSpeedMps);
+
+  speedometer.handle(fix({ timestamp: 0, longitude: 0, speed: speedMps }));
+  speedometer.handle(fix({ timestamp: 1_000, longitude: longitudeDelta, speed: speedMps }));
+
+  assert.equal(speedometer.acceptedLocationTimestamp(), 1_000);
+  assert.equal(speedometer.snapshot().mph, 179);
+  assert.equal(speedometer.kinematicSample().evidenceSpeedMps, speedMps);
+});
+
+test("GPS validation options reject non-positive and non-finite policy limits", () => {
+  for (const options of [
+    { maximumSpeedMps: 0 },
+    { maximumHorizontalAccuracyMetres: Number.NaN },
+    { maximumSpeedDisagreementMps: Number.POSITIVE_INFINITY },
+  ]) {
+    assert.throws(() => createGpsSpeedometer(options), /must be a positive finite number/);
+  }
 });
 
 test("missing platform speed is derived from successive timestamped positions", () => {
@@ -276,11 +392,11 @@ test("refinement evidence keeps unsmoothed speed, course, and GPS accuracy", () 
 
 test("kinematic heading prefers platform data and derives a wrap-safe bearing", () => {
   const speedometer = createGpsSpeedometer({ smoothingFactor: 1 });
-  speedometer.handle({ ...fix({ timestamp: 0, latitude: 0, longitude: 179.999, speed: 15 }), heading: 359 });
+  speedometer.handle({ ...fix({ timestamp: 0, latitude: 0, longitude: 179.9999, speed: 15 }), heading: 359 });
   assert.equal(speedometer.kinematicSample().headingDegrees, 359);
   assert.equal(speedometer.kinematicSample().accuracy, 3);
 
-  speedometer.handle(fix({ timestamp: 1_000, latitude: 0, longitude: -179.999, speed: 15 }));
+  speedometer.handle(fix({ timestamp: 1_000, latitude: 0, longitude: -179.9999, speed: 15 }));
   assert.ok(Math.abs(speedometer.kinematicSample().headingDegrees - 90) < 0.01);
   assert.ok(Math.abs(bearingDegrees(
     { latitude: 0, longitude: 179.999 },
