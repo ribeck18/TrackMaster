@@ -13,7 +13,7 @@
     <script type="module" src="./js/main.js"></script>
   </head>
   <body>
-    <main id="app" class="app-shell" aria-live="polite">
+    <main id="app" class="app-shell">
       <p class="rotation-lock-hint">For the native view, disable Rotation Lock and turn your phone sideways.</p>
 
       <section class="screen gate-screen" data-screen="enable" aria-labelledby="enable-title">
@@ -52,16 +52,53 @@
         </div>
       </section>
 
-      <section class="screen placeholder-screen" data-screen="ready" aria-labelledby="ready-title" hidden>
+      <section class="screen ready-screen" data-screen="ready" aria-labelledby="ready-title" hidden>
         <button class="screen-action" type="button" data-action="start-race">
           <span class="visually-hidden">Start race</span>
         </button>
-        <div class="placeholder-content">
-          <p class="eyebrow">SENSORS ZEROED</p>
-          <h1 id="ready-title" tabindex="-1">READY</h1>
-          <p class="screen-copy">The live instruments arrive in the next implementation slice.</p>
-          <p class="sensor-readouts">LEAN <output data-readout="motion">WAITING</output> · SPEED <output data-readout="location">WAITING</output></p>
-          <p class="tap-prompt">TAP ANYWHERE TO START RACE</p>
+        <h1 id="ready-title" class="visually-hidden" tabindex="-1">Ready</h1>
+        <div class="ready-instruments" aria-describedby="ready-start-prompt">
+          <div class="ready-top">
+            <div class="instrument-column speed-instrument">
+              <p class="instrument-eyebrow">SPEED</p>
+              <output class="speed-value" data-speed-value aria-label="Speed unavailable">--</output>
+              <p class="instrument-unit">MPH</p>
+              <p class="gps-warning" data-gps-warning role="status">GPS · NO FIX</p>
+            </div>
+            <div class="instrument-divider" aria-hidden="true"></div>
+            <div class="instrument-column lean-instrument">
+              <p class="instrument-eyebrow">LEAN ANGLE</p>
+              <div class="lean-gauge">
+                <svg viewBox="0 0 400 232" role="img" aria-labelledby="ready-gauge-title ready-gauge-description">
+                  <title id="ready-gauge-title">Lean angle gauge</title>
+                  <desc id="ready-gauge-description">Parked at zero degrees and level</desc>
+                  <path class="gauge-track" d="M 56.582 97.950 A 182 182 0 0 1 343.418 97.950"></path>
+                  <path class="gauge-active" d="M 200 28 L 200 28"></path>
+                  <g class="gauge-ticks">
+                    <line class="gauge-tick gauge-tick--major" x1="93.934" y1="103.934" x2="76.963" y2="86.963"></line>
+                    <line class="gauge-tick" x1="120" y1="71.436" x2="113" y2="59.312"></line>
+                    <line class="gauge-tick" x1="158.589" y1="55.452" x2="154.965" y2="41.929"></line>
+                    <line class="gauge-tick gauge-tick--major" x1="200" y1="60" x2="200" y2="36"></line>
+                    <line class="gauge-tick" x1="241.411" y1="55.452" x2="245.035" y2="41.929"></line>
+                    <line class="gauge-tick" x1="280" y1="71.436" x2="287" y2="59.312"></line>
+                    <line class="gauge-tick gauge-tick--major" x1="306.066" y1="103.934" x2="323.037" y2="86.963"></line>
+                  </g>
+                  <line class="gauge-needle" x1="200" y1="210" x2="200" y2="94"></line>
+                  <circle class="gauge-hub" cx="200" cy="210" r="14"></circle>
+                </svg>
+              </div>
+              <div class="lean-readout">
+                <output class="lean-value" aria-label="Lean angle 0 degrees">0°</output>
+                <span class="lean-direction">LEVEL</span>
+              </div>
+            </div>
+          </div>
+          <div class="ready-bottom">
+            <span class="timer-eyebrow">LAP TIME</span>
+            <output class="ready-time" aria-label="Lap time zero minutes">00:00.0</output>
+            <span class="timer-divider" aria-hidden="true"></span>
+            <span id="ready-start-prompt" class="ready-prompt">TAP ANYWHERE TO START RACE</span>
+          </div>
         </div>
       </section>
 

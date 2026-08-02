@@ -161,20 +161,33 @@ export function createBrowserSensorSource({
       }
 
       function onLocationError(error) {
-        if (settled) return;
         if (error?.code === 1) {
           watchShouldContinue = false;
           stopUnavailableWatch();
-          settle(result(SENSOR_STATUS.DENIED, "Location permission was denied."));
+          const denied = result(SENSOR_STATUS.DENIED, "Location permission was denied.");
+          if (settled) {
+            if (currentStatus !== SENSOR_STATUS.DENIED) {
+              currentStatus = SENSOR_STATUS.DENIED;
+              emit({ type: "access", sensor: "location", outcome: denied });
+            }
+          } else {
+            settle(denied);
+          }
           return;
         }
 
-        settle(
-          result(
-            SENSOR_STATUS.UNAVAILABLE,
-            error?.message ?? "Location is temporarily unavailable.",
-          ),
+        const unavailable = result(
+          SENSOR_STATUS.UNAVAILABLE,
+          error?.message ?? "Location is temporarily unavailable.",
         );
+        if (settled) {
+          if (currentStatus === SENSOR_STATUS.GRANTED) {
+            currentStatus = SENSOR_STATUS.UNAVAILABLE;
+            emit({ type: "access", sensor: "location", outcome: unavailable });
+          }
+          return;
+        }
+        settle(unavailable);
       }
 
       try {

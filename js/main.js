@@ -1,4 +1,5 @@
 import { createAccessOutcomeState } from "./access-outcome-state.js";
+import { createGpsSpeedometer } from "./core/gps-speed.js";
 import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js";
 import {
   isRawRecorderExportEnabled,
@@ -29,6 +30,9 @@ const bubble = spiritLevel.querySelector(".level__bubble");
 const unavailableLevel = spiritLevel.querySelector(".level__unavailable");
 const enableButton = document.querySelector('[data-action="enable"]');
 const accessOutcomeState = createAccessOutcomeState();
+const gpsSpeedometer = createGpsSpeedometer();
+const speedValue = document.querySelector("[data-speed-value]");
+const gpsWarning = document.querySelector("[data-gps-warning]");
 
 let currentState = "enable";
 let lap = 1;
@@ -73,6 +77,7 @@ function updateSpiritLevel(sample) {
 }
 
 function handleSensorSample(sample) {
+  gpsSpeedometer.handle(sample);
   updateSpiritLevel(sample);
 
   if (sample.type !== "access") return;
@@ -103,6 +108,8 @@ function recoveryParagraph(text) {
 }
 
 function applyAccessOutcomes(outcomes) {
+  if (outcomes.location.status !== SENSOR_STATUS.GRANTED) gpsSpeedometer.clearFix();
+
   const recovery = document.querySelector("[data-recovery-guidance]");
   recovery.replaceChildren();
 
@@ -223,11 +230,31 @@ document.querySelector('[data-action="continue-limited"]').addEventListener("cli
   dispatch("CONTINUE_LIMITED");
 });
 
+function renderGpsSpeed() {
+  const reading = gpsSpeedometer.snapshot();
+  const nextValue = reading.hasSpeed ? String(reading.mph) : "--";
+  if (speedValue.textContent !== nextValue) speedValue.textContent = nextValue;
+  speedValue.setAttribute(
+    "aria-label",
+    reading.hasSpeed ? `Speed ${reading.mph} miles per hour` : "Speed unavailable",
+  );
+  if (gpsWarning.textContent !== reading.warning) gpsWarning.textContent = reading.warning;
+  gpsWarning.classList.toggle("is-clear", reading.warning === "");
+}
+
+// Instrument numerals are intentionally capped at 5 Hz even when a simulator,
+// replay, or future browser source delivers fixes faster than the GPS radio.
+const speedRenderTimer = window.setInterval(renderGpsSpeed, 200);
+renderGpsSpeed();
+
 window.addEventListener("pagehide", (event) => {
   // A persisted pagehide enters the back-forward cache; its live JS heap and
   // sensor source resume on pageshow, so destroying here would make the restored
   // UI permanently stale. Final navigations still release both platform watches.
-  if (shouldDestroySensorsOnPageHide(event)) sensorSource.destroy();
+  if (shouldDestroySensorsOnPageHide(event)) {
+    window.clearInterval(speedRenderTimer);
+    sensorSource.destroy();
+  }
 });
 
 render(currentState, { moveFocus: false });

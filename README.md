@@ -55,4 +55,4 @@ All repository-owned assets use document-relative paths (`./css/...`, `./js/...`
 
 ## Current scope
 
-The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready, Race, and Report retain only the minimum controls needed to prove routing; estimator, lap timing, and report UI behavior belong to later issues.
+The shell models six mutually exclusive states: Enable, Calibrate, Ready, Race, Report, and Permission Denied. Browser sensor permissions, degraded access, and the unified raw sensor source are implemented. Ready renders smoothed live GPS speed in MPH, no-fix recovery, and the exact parked lean gauge. Race and Report retain only the minimum controls needed to prove routing; live lean estimation, lap timing, and report UI behavior belong to later issues.

@@ -174,6 +174,32 @@ for (const errorCode of [2, 3]) {
   });
 }
 
+test("a live fix loss emits unavailable and a later fix recovers on the same watch", async () => {
+  const app = harness({ requestPermission: true });
+  const samples = [];
+  app.source.subscribe((sample) => samples.push(sample));
+  const access = app.source.requestAccess();
+
+  app.resolveMotion("granted");
+  app.succeedLocation();
+  await access;
+
+  app.failLocation(2, "GPS signal lost");
+  assert.deepEqual(samples.at(-1), {
+    type: "access",
+    sensor: "location",
+    outcome: { status: SENSOR_STATUS.UNAVAILABLE, reason: "GPS signal lost" },
+  });
+  assert.equal(app.calls.includes("clear-41"), false);
+
+  app.succeedLocation();
+  assert.deepEqual(samples.at(-1), {
+    type: "access",
+    sensor: "location",
+    outcome: { status: SENSOR_STATUS.GRANTED, reason: "" },
+  });
+});
+
 test("first-fix timeout is unavailable, retains the watch, and recovers later", async () => {
   const timers = [];
   const calls = [];
