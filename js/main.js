@@ -25,6 +25,11 @@ import {
 } from "./core/report.js";
 import { createSessionRecorder } from "./core/session-recorder.js";
 import {
+  applyRunSaveOutcome,
+  createRunStore,
+  RUN_SAVE_STATUS,
+} from "./core/run-store.js";
+import {
   isRawRecorderExportEnabled,
   selectSensorSource,
 } from "./dev/dev-sensor-source.js";
@@ -76,13 +81,7 @@ const readyLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-lea
 const raceLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-race-lean-instrument]"));
 const sessionRecorder = createSessionRecorder({ nowRef: monotonicNow });
 const raceWakeLock = createRaceWakeLock();
-// Issue #11 replaces this one-method seam with JSON/GPX sharing. Returning true
-// is the only signal that NEW RUN may discard without confirmation.
-const runStore = Object.freeze({
-  async save(_report) {
-    return false;
-  },
-});
+const runStore = createRunStore();
 
 let currentState = "enable";
 let lastGyroReceivedAt = null;
@@ -90,6 +89,7 @@ let motionGrantedAt = null;
 let latestPosition = null;
 let lastValidSpeedReceivedAt = null;
 let raceTiming = null;
+let raceStartedAtUnixMs = null;
 let completedSession = null;
 let raceTimer = null;
 let lastLapActivationAt = Number.NEGATIVE_INFINITY;
@@ -106,6 +106,7 @@ function applyLapTrim(lapIndex, adjustmentMs) {
   );
   if (report === completedSession.report) return;
   completedSession = Object.freeze({ report, exported: false });
+  saveStatus.textContent = "";
   renderRunReport(reportScreen, report, {
     onTrim: applyLapTrim,
     focusTrim: { lapIndex, adjustmentMs },
@@ -433,6 +434,7 @@ document.querySelector('[data-action="start-race"]').addEventListener("click", (
   const now = monotonicNow();
   lastLapActivationAt = now;
   raceTiming = startLapTiming(now);
+  raceStartedAtUnixMs = Date.now();
   runCount += 1;
   completedSession = null;
   lapNumber.textContent = "1";
@@ -471,9 +473,16 @@ document.querySelector('[data-action="end-race"]').addEventListener("click", (ev
   const recordedSession = sessionRecorder.stop(now);
   const report = aggregateRunReport(
     { timing: raceTiming, samples: recordedSession.samples },
-    { runNumber: runCount, runId: null, riderId: null },
+    {
+      runNumber: runCount,
+      runId: null,
+      riderId: null,
+      startedAtUnixMs: raceStartedAtUnixMs,
+      endedAtUnixMs: raceStartedAtUnixMs + (now - raceTiming.sessionStartTime),
+    },
   );
   completedSession = Object.freeze({ report, exported: false });
+  saveStatus.textContent = "";
   delete reportScreen.dataset.expandedLap;
   delete reportScreen.dataset.trackMode;
   renderRunReport(reportScreen, report, { onTrim: applyLapTrim });
@@ -496,6 +505,7 @@ document.querySelector('[data-action="new-run"]').addEventListener("click", () =
     return;
   }
   raceTiming = null;
+  raceStartedAtUnixMs = null;
   completedSession = null;
   delete reportScreen.dataset.expandedLap;
   delete reportScreen.dataset.trackMode;
@@ -508,13 +518,13 @@ saveButton.addEventListener("click", async () => {
   saveButton.disabled = true;
   saveStatus.textContent = "PREPARING EXPORT…";
   try {
-    const exported = await runStore.save(sessionBeingSaved.report);
+    const outcome = await runStore.save(sessionBeingSaved.report);
     if (completedSession !== sessionBeingSaved) return;
-    if (exported) {
-      completedSession = Object.freeze({ ...sessionBeingSaved, exported: true });
+    completedSession = applyRunSaveOutcome(completedSession, sessionBeingSaved, outcome);
+    if (outcome.status === RUN_SAVE_STATUS.EXPORTED) {
       saveStatus.textContent = "RUN EXPORTED";
     } else {
-      saveStatus.textContent = "EXPORT NOT AVAILABLE IN THIS BUILD";
+      saveStatus.textContent = "EXPORT CANCELLED · RUN RETAINED";
     }
   } catch (error) {
     console.error("Run export failed.", error);

@@ -34,6 +34,8 @@ function freezeSample(sample, startedAt, timing) {
     timestamp,
     latitude: hasPosition ? sample.latitude : null,
     longitude: hasPosition ? sample.longitude : null,
+    locationTimestamp:
+      hasPosition && Number.isFinite(sample.locationTimestamp) ? sample.locationTimestamp : null,
     speedMph: speedOrNull(sample.speedMph),
     speedValid: sample.speedValid === true,
     leanDegrees: finiteOrNull(sample.leanDegrees),
@@ -222,6 +224,8 @@ export function aggregateRunReport(
     riderId = null,
     originalLapBoundaries = null,
     lapTrimOffsets = null,
+    startedAtUnixMs = null,
+    endedAtUnixMs = null,
   } = {},
 ) {
   validateTiming(timing);
@@ -230,6 +234,16 @@ export function aggregateRunReport(
   }
   if ((runId !== null && typeof runId !== "string") || (riderId !== null && typeof riderId !== "string")) {
     throw new TypeError("Reserved run and rider identifiers must be strings or null.");
+  }
+  if (
+    (startedAtUnixMs !== null && !Number.isFinite(startedAtUnixMs)) ||
+    (endedAtUnixMs !== null && !Number.isFinite(endedAtUnixMs)) ||
+    ((startedAtUnixMs === null) !== (endedAtUnixMs === null)) ||
+    (startedAtUnixMs !== null && Math.abs(
+      (endedAtUnixMs - startedAtUnixMs) - (timing.endedAt - timing.sessionStartTime)
+    ) > 1)
+  ) {
+    throw new RangeError("Wall-clock run boundaries must be a matching finite pair with the session duration.");
   }
 
   const currentBoundaries = timing.laps.map((lap) => lap.endTime);
@@ -308,6 +322,8 @@ export function aggregateRunReport(
     runNumber,
     startedAt: timing.sessionStartTime,
     endedAt: timing.endedAt,
+    startedAtUnixMs,
+    endedAtUnixMs,
     totalDurationMs: timing.endedAt - timing.sessionStartTime,
     lapCount: laps.length,
     laps,
@@ -436,6 +452,8 @@ export function adjustLapBoundary(report, lapIndex, adjustmentMs) {
       riderId: report.riderId,
       originalLapBoundaries: report.trim.originalBoundaries,
       lapTrimOffsets: offsets,
+      startedAtUnixMs: report.startedAtUnixMs,
+      endedAtUnixMs: report.endedAtUnixMs,
     },
   );
 }

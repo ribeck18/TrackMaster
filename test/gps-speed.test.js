@@ -86,19 +86,19 @@ test("report position changes only with the exact timestamp accepted for speed",
   }
 
   handle(fix({ timestamp: 1_000, latitude: 10, longitude: 20, speed: 10 }));
-  assert.deepEqual(position, { latitude: 10, longitude: 20 });
+  assert.deepEqual(position, { latitude: 10, longitude: 20, timestamp: 1_000 });
   assert.equal(speedometer.snapshot().mph, 22);
 
   handle(fix({ timestamp: 500, latitude: 50, longitude: 60, speed: 0 }));
-  assert.deepEqual(position, { latitude: 10, longitude: 20 });
+  assert.deepEqual(position, { latitude: 10, longitude: 20, timestamp: 1_000 });
   assert.equal(speedometer.snapshot().mph, 22, "reordered coordinates cannot desynchronise accepted speed");
 
   handle(fix({ timestamp: 1_000, latitude: 51, longitude: 61, speed: 0 }));
-  assert.deepEqual(position, { latitude: 10, longitude: 20 });
+  assert.deepEqual(position, { latitude: 10, longitude: 20, timestamp: 1_000 });
   assert.equal(speedometer.snapshot().mph, 22, "duplicate timestamps are not mistaken for acceptance");
 
   handle(fix({ timestamp: 2_000, latitude: 11, longitude: 21, speed: 20 }));
-  assert.deepEqual(position, { latitude: 11, longitude: 21 });
+  assert.deepEqual(position, { latitude: 11, longitude: 21, timestamp: 2_000 });
   assert.equal(speedometer.snapshot().mph, 45);
 });
 
@@ -127,7 +127,7 @@ test("null and non-finite rejected fixes feed neither lean nor forced session ca
 
   assert.equal(leanUpdates, 1);
   assert.equal(recorder.sampleCount(), 1);
-  assert.deepEqual(position, { latitude: 10, longitude: 20 });
+  assert.deepEqual(position, { latitude: 10, longitude: 20, timestamp: 1_000 });
   assert.equal(speedometer.snapshot().mph, 22);
   recorder.stop(40);
 });

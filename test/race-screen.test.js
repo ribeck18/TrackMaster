@@ -59,7 +59,7 @@ test("an awaited SAVE result cannot mark a replacement session exported", () => 
   assert.match(saveBlock, /const sessionBeingSaved = completedSession/);
   assert.match(saveBlock, /runStore\.save\(sessionBeingSaved\.report\)/);
   assert.match(saveBlock, /if \(completedSession !== sessionBeingSaved\) return/);
-  assert.match(saveBlock, /\.\.\.sessionBeingSaved, exported: true/);
+  assert.match(saveBlock, /applyRunSaveOutcome\(completedSession, sessionBeingSaved, outcome\)/);
   assert.doesNotMatch(saveBlock, /\.\.\.completedSession, exported: true/);
 });
 

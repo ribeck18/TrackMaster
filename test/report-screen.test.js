@@ -42,7 +42,7 @@ test("ended report wiring keeps a reload-reset in-memory run count and reserved 
   assert.match(main, /let runCount = 0/);
   assert.match(main, /runCount \+= 1/);
   assert.doesNotMatch(main, /localStorage|sessionStorage|indexedDB/i);
-  assert.match(main, /\{ runNumber: runCount, runId: null, riderId: null \}/);
+  assert.match(main, /runNumber: runCount,[\s\S]*?runId: null,[\s\S]*?riderId: null/);
   assert.match(main, /aggregateRunReport\([\s\S]*?renderRunReport\(reportScreen, report, \{ onTrim: applyLapTrim \}\)/);
 });
 
@@ -55,8 +55,8 @@ test("NEW RUN confirms only while the completed run is unexported and SAVE uses 
   assert.match(newRunBlock, /const sessionBeingSaved = completedSession/);
   assert.match(newRunBlock, /runStore\.save\(sessionBeingSaved\.report\)/);
   assert.match(newRunBlock, /completedSession !== sessionBeingSaved/);
-  assert.match(newRunBlock, /\.\.\.sessionBeingSaved, exported: true/);
-  assert.match(main, /const runStore = Object\.freeze\(\{[\s\S]*?async save/);
+  assert.match(newRunBlock, /applyRunSaveOutcome\(completedSession, sessionBeingSaved, outcome\)/);
+  assert.match(main, /const runStore = createRunStore\(\)/);
 });
 
 test("SAVE seam receives the latest trimmed report and each ended report clears old accordion state", () => {

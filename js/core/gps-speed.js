@@ -33,7 +33,11 @@ export function positionForAcceptedLocation(sample, acceptedTimestamp, currentPo
   ) {
     return currentPosition;
   }
-  return Object.freeze({ latitude: sample.latitude, longitude: sample.longitude });
+  return Object.freeze({
+    latitude: sample.latitude,
+    longitude: sample.longitude,
+    timestamp: sample.timestamp,
+  });
 }
 
 function normalizeHeading(degrees) {

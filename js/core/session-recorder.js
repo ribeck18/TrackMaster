@@ -12,6 +12,7 @@ function createSample(reading, timestamp, startedAt) {
     timestamp,
     latitude: finiteOrNull(position?.latitude),
     longitude: finiteOrNull(position?.longitude),
+    locationTimestamp: finiteOrNull(position?.timestamp),
     speedMph: finiteOrNull(reading.speedMph),
     speedValid: reading.speedValid === true,
     leanDegrees: finiteOrNull(reading.leanDegrees),

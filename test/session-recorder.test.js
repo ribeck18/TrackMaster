@@ -7,7 +7,7 @@ test("session recorder keeps timestamped position, speed, and lean readings", ()
   const recorder = createSessionRecorder({ minimumIntervalMs: 50 });
   recorder.start(1_000);
   assert.equal(recorder.record({
-    position: { latitude: 37.42, longitude: -122.08 },
+    position: { latitude: 37.42, longitude: -122.08, timestamp: 1_722_513_600_000 },
     speedMph: 87,
     speedValid: true,
     leanDegrees: -42.25,
@@ -21,6 +21,7 @@ test("session recorder keeps timestamped position, speed, and lean readings", ()
     timestamp: 1_000,
     latitude: 37.42,
     longitude: -122.08,
+    locationTimestamp: 1_722_513_600_000,
     speedMph: 87,
     speedValid: true,
     leanDegrees: -42.25,
@@ -30,6 +31,7 @@ test("session recorder keeps timestamped position, speed, and lean readings", ()
     timestamp: 1_020,
     latitude: null,
     longitude: null,
+    locationTimestamp: null,
     speedMph: 88,
     speedValid: false,
     leanDegrees: -43,
