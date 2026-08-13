@@ -59,6 +59,32 @@ test("NEW RUN confirms only while the completed run is unexported and SAVE uses 
   assert.match(main, /const runStore = createRunStore\(\)/);
 });
 
+test("raw recorder exports have independent report status, retry, discard, and replacement guards", () => {
+  assert.match(html, /data-raw-export-status aria-live="polite" hidden/);
+  assert.match(html, /data-action="retry-raw-export" hidden>RETRY RAW LOG/);
+  assert.match(main, /createRawLogExportState\(\{ exportLog: exportRawSensorLog \}\)/);
+  assert.match(main, /RAW LOG EXPORT CANCELLED · RETAINED/);
+  assert.match(main, /RAW LOG EXPORT FAILED · RETAINED/);
+  assert.match(main, /rawLogExportState\.begin\(rawLog\)/);
+  assert.match(main, /rawLogExportState\?\.retry\(\)/);
+  assert.match(main, /discardPendingRawLogForReplacement\(\)/);
+  assert.match(main, /rawLogExportState\.discard\(\)/);
+  assert.match(main, /window\.addEventListener\("beforeunload"/);
+
+  const newRunBlock = main.slice(
+    main.indexOf("function discardPendingRawLogForReplacement"),
+    main.indexOf("retryRawExportButton.addEventListener"),
+  );
+  assert.match(newRunBlock, /!completedSession\.exported[\s\S]*?window\.confirm/);
+  assert.match(newRunBlock, /discardPendingRawLogForReplacement\(\)/);
+
+  const startBlock = main.slice(
+    main.indexOf('[data-action="start-race"]'),
+    main.indexOf('[data-action="complete-lap"]'),
+  );
+  assert.match(startBlock, /discardPendingRawLogForReplacement\(\)/);
+});
+
 test("SAVE seam receives the latest trimmed report and each ended report clears old accordion state", () => {
   const trimBlock = main.slice(
     main.indexOf("function applyLapTrim"),

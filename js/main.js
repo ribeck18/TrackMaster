@@ -20,6 +20,10 @@ import {
 import { REPLAY_INITIALIZATION_ACTION } from "./core/raw-sensor-log.js";
 import { exportRawSensorLog, createRawSensorRecorder } from "./core/recorder.js";
 import {
+  createRawLogExportState,
+  RAW_LOG_EXPORT_STATUS,
+} from "./core/raw-log-export-state.js";
+import {
   adjustLapBoundaryIfAllowed,
   aggregateRunReport,
 } from "./core/report.js";
@@ -60,6 +64,9 @@ const selectedSensorSource = await selectSensorSource({
 });
 const exportRawRecording = isRawRecorderExportEnabled(window.location.search);
 const rawRecorder = exportRawRecording ? createRawSensorRecorder(selectedSensorSource) : null;
+const rawLogExportState = rawRecorder
+  ? createRawLogExportState({ exportLog: exportRawSensorLog })
+  : null;
 const sensorSource = rawRecorder ?? selectedSensorSource;
 const replayInitialization = sensorSource.getReplayInitialization?.() ?? null;
 const spiritLevel = document.querySelector("[data-spirit-level]");
@@ -80,6 +87,8 @@ const lastLap = document.querySelector("[data-last-lap]");
 const reportScreen = document.querySelector('[data-screen="report"]');
 const saveButton = document.querySelector('[data-action="save-run"]');
 const saveStatus = document.querySelector("[data-save-status]");
+const rawExportStatus = document.querySelector("[data-raw-export-status]");
+const retryRawExportButton = document.querySelector('[data-action="retry-raw-export"]');
 const zeroButton = document.querySelector('[data-action="zero"]');
 const calibrationStatus = document.querySelector("[data-calibration-status]");
 const leanEstimator = assertLeanEstimator(createLeanEstimator({ nowRef: monotonicNow }));
@@ -102,6 +111,34 @@ function renderWakeLockStatus(state) {
 }
 
 raceWakeLock.subscribe(renderWakeLockStatus);
+
+function renderRawExportStatus({ status }) {
+  if (!rawLogExportState || status === null) {
+    rawExportStatus.hidden = true;
+    retryRawExportButton.hidden = true;
+    return;
+  }
+  const messages = {
+    [RAW_LOG_EXPORT_STATUS.EXPORTING]: "RAW LOG EXPORTING…",
+    [RAW_LOG_EXPORT_STATUS.CANCELLED]: "RAW LOG EXPORT CANCELLED · RETAINED",
+    [RAW_LOG_EXPORT_STATUS.FAILED]: "RAW LOG EXPORT FAILED · RETAINED",
+    [RAW_LOG_EXPORT_STATUS.EXPORTED]: "RAW LOG EXPORTED",
+  };
+  rawExportStatus.hidden = false;
+  rawExportStatus.textContent = messages[status];
+  retryRawExportButton.hidden = ![
+    RAW_LOG_EXPORT_STATUS.CANCELLED,
+    RAW_LOG_EXPORT_STATUS.FAILED,
+  ].includes(status);
+}
+
+rawLogExportState?.subscribe(renderRawExportStatus);
+
+function logRawExportFailure({ status, error }) {
+  if (status === RAW_LOG_EXPORT_STATUS.FAILED) {
+    console.error("Raw sensor export failed.", error);
+  }
+}
 
 let currentState = "enable";
 let lastGyroReceivedAt = null;
@@ -486,6 +523,7 @@ function acceptLapActivation(now) {
 
 document.querySelector('[data-action="start-race"]').addEventListener("click", async () => {
   if (currentState !== "ready" || replayRaceStarting) return;
+  if (!discardPendingRawLogForReplacement()) return;
   if (replayInitialization) {
     replayRaceStarting = true;
     try {
@@ -561,10 +599,19 @@ document.querySelector('[data-action="end-race"]').addEventListener("click", (ev
 
   if (rawRecorder) {
     const rawLog = rawRecorder.stopRecording();
-    void exportRawSensorLog(rawLog).catch((error) => console.error("Raw sensor export failed.", error));
+    void rawLogExportState.begin(rawLog).then(logRawExportFailure);
   }
   dispatch("END_RACE");
 });
+
+function discardPendingRawLogForReplacement() {
+  if (!rawLogExportState?.hasPending()) return true;
+  if (!window.confirm("A raw recorder log has not been exported. Discard it and start a new run?")) {
+    return false;
+  }
+  rawLogExportState.discard();
+  return true;
+}
 
 document.querySelector('[data-action="new-run"]').addEventListener("click", () => {
   if (
@@ -574,12 +621,18 @@ document.querySelector('[data-action="new-run"]').addEventListener("click", () =
   ) {
     return;
   }
+  if (!discardPendingRawLogForReplacement()) return;
   raceTiming = null;
   raceStartedAtUnixMs = null;
   completedSession = null;
   delete reportScreen.dataset.expandedLap;
   delete reportScreen.dataset.trackMode;
   dispatch("NEW_RUN");
+});
+
+retryRawExportButton.addEventListener("click", () => {
+  const retry = rawLogExportState?.retry();
+  if (retry) void retry.then(logRawExportFailure);
 });
 
 saveButton.addEventListener("click", async () => {
@@ -637,6 +690,12 @@ function renderInstruments() {
 // replay, or future browser source delivers fixes faster than the GPS radio.
 const instrumentRenderTimer = window.setInterval(renderInstruments, 200);
 renderInstruments();
+
+window.addEventListener("beforeunload", (event) => {
+  if (!rawLogExportState?.hasPending()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 
 window.addEventListener("pagehide", (event) => {
   // A persisted pagehide enters the back-forward cache; its live JS heap and

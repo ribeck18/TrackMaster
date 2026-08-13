@@ -110,7 +110,8 @@ test("frequent speed updates are outside the app-wide live region", () => {
   assert.match(html, /data-gps-warning role="status"/);
   assert.match(html, /data-recovery-guidance aria-live="polite"/);
   assert.match(html, /data-save-status aria-live="polite"/);
-  assert.equal((html.match(/aria-live=/g) ?? []).length, 2, "only targeted status regions are live");
+  assert.match(html, /data-raw-export-status aria-live="polite"/);
+  assert.equal((html.match(/aria-live=/g) ?? []).length, 3, "only targeted status regions are live");
 });
 
 test("README describes Ready as implemented rather than a routing placeholder", () => {

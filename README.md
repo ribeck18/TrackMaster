@@ -95,7 +95,7 @@ Developer sources are selected only by URL parameters; there is no rider-facing 
 
 - `?dev-sensors=simulator` replaces hardware with a deterministic 38-second session. It begins with a stable calibration interval, then includes low-speed (under 15 mph) manoeuvring, physically matched constant-radius corners in both directions, an 85-to-12 mph upright braking event, and gradual acceleration/finish sections. Its source readings include gravity, normalized three-axis body gyro rate, and orientation alongside GPS. Add `&dev-rate=4` to deliver it four times faster.
 - `?dev-sensors=replay&replay-log=./trackmaster-raw-sensors.json` fetches a raw log and replays its untouched values and timestamps. Current v2 logs also restore the explicit initialization action—recorded calibration or continue without lean—and untouched pre/post-action readings before Race sample 1 is released. `dev-rate` changes delivery timing only.
-- `?dev-recorder=1` keeps real hardware selected, emits a v2 log with the accepted calibration or explicit continue-without-lean action, captures untouched access-to-Race initialization readings, and records untouched source readings during Race. **END RACE** exports the in-memory raw JSON log automatically.
+- `?dev-recorder=1` keeps real hardware selected, emits a v2 log with the accepted calibration or explicit continue-without-lean action, captures untouched access-to-Race initialization readings, and records untouched source readings during Race. **END RACE** exports the in-memory raw JSON log automatically. If that export is cancelled or fails, Report retains the exact stopped log in RAM, shows its status, and offers **RETRY RAW LOG**.
 
 `dev-recorder=1` is real-hardware-only and must not be combined with `dev-sensors=simulator` or `dev-sensors=replay`; Apex rejects those ambiguous URLs. Simulator and replay remain standalone source modes. The loader retains legacy v1 play-on-access behavior, while every newly recorded v2 log requires initialization/action metadata and uses gated playback.
 
@@ -105,7 +105,7 @@ Recording uses RAM only. Export uses the Web Share API or an in-memory Blob down
 
 1. Before leaving coverage, open `https://ribeck18.github.io/TrackMaster/?dev-recorder=1` in Safari and keep that tab available. Confirm the URL still contains `dev-recorder=1`; the normal Home Screen launch does not enable recording.
 2. At the track, mount the phone rigidly, open that recorder URL, grant sensors, calibrate while fully upright and stationary, and begin the session.
-3. After stopping safely, tap **END RACE**. In the automatic share sheet save `trackmaster-raw-sensors.json` to **On My iPhone**, AirDrop it, or choose another destination known to work offline. Do not cancel: the raw log exists only in RAM and there is no later retry button.
+3. After stopping safely, tap **END RACE**. In the automatic share sheet save `trackmaster-raw-sensors.json` to **On My iPhone**, AirDrop it, or choose another destination known to work offline. If the share is cancelled or fails, Report retains that exact stopped log in RAM and offers **RETRY RAW LOG**. Starting a replacement run or navigating away warns before discarding a retained raw log.
 4. Back on the report, tap **SAVE RUN** separately to export the processed run JSON and GPX. These are not substitutes for the untouched raw recorder log.
 5. Keep the raw log together with the circuit/layout, session time, weather, tire notes, mount orientation, and any transponder/video reference. Do not edit the log before replay.
 

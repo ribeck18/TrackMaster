@@ -1077,11 +1077,30 @@ h1 {
   gap: 12px;
 }
 
-.save-status {
-  margin-right: auto;
+.save-status,
+.raw-export-status {
   color: rgba(255, 255, 255, 0.45);
   font-size: 9px;
   letter-spacing: 1px;
+}
+
+.raw-export-status {
+  color: #ffc85c;
+}
+
+.raw-export-retry {
+  padding: 8px 13px;
+  border: 1px solid rgba(255, 200, 92, 0.75);
+  border-radius: 20px;
+  background: transparent;
+  color: #ffc85c;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.save-status {
+  margin-right: auto;
 }
 
 .save-button {
