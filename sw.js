@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "apex-lap-tracker-";
-const BUILD_STAMP = "20260802-issue3-replay-init";
+const BUILD_STAMP = "20260802-issue17-http-cache";
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_STAMP}`;
 
 // Keep this list explicit: a successful install means the complete application
@@ -50,10 +50,40 @@ function scopedUrl(relativeUrl) {
   return new URL(relativeUrl, self.registration.scope).href;
 }
 
+function isCacheablePrecacheResponse(response) {
+  const vary = response?.headers?.get("Vary") ?? "";
+  return (
+    response?.ok === true &&
+    response.status !== 206 &&
+    response.type !== "error" &&
+    !vary.split(",").some((value) => value.trim() === "*")
+  );
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
+    const assets = await Promise.all(PRECACHE_URLS.map(async (relativeUrl) => {
+      const url = scopedUrl(relativeUrl);
+      const response = await fetch(new Request(url, { cache: "reload" }));
+      if (!isCacheablePrecacheResponse(response)) {
+        throw new TypeError(`Precache failed: ${url}`);
+      }
+      return { url, response };
+    }));
+
+    // Fetch and validate the complete build before creating its stamped cache.
+    // Canonical keys keep normal cache-first lookups independent of retrieval mode.
     const cache = await caches.open(CACHE_NAME);
-    await cache.addAll(PRECACHE_URLS.map(scopedUrl));
+    try {
+      // Write serially so a failed write cannot race cleanup of its partial cache.
+      for (const { url, response } of assets) {
+        await cache.put(url, response);
+      }
+    } catch (error) {
+      // A new build must be complete or absent; the prior stamped cache remains intact.
+      await caches.delete(CACHE_NAME);
+      throw error;
+    }
     await self.skipWaiting();
   })());
 });

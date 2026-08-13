@@ -11,6 +11,7 @@ import {
 } from "../js/register-service-worker.js";
 
 const ROOT_URL = "https://example.test/TrackMaster/";
+const CURRENT_CACHE_NAME = "apex-lap-tracker-20260802-issue17-http-cache";
 
 async function text(file) {
   return readFile(new URL(`../${file}`, import.meta.url), "utf8");
@@ -81,10 +82,15 @@ function parsePng(buffer) {
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
-function createServiceWorkerHarness({ failPath = null } = {}) {
+function createServiceWorkerHarness({
+  failPath = null,
+  failCachePutPath = null,
+  staleHttpCache = false,
+} = {}) {
   const handlers = new Map();
   const stores = new Map();
   const networkRequests = [];
+  const cachePutRequests = [];
   let offline = false;
   let skipWaitingCalls = 0;
   let claimCalls = 0;
@@ -94,27 +100,36 @@ function createServiceWorkerHarness({ failPath = null } = {}) {
   }
 
   async function network(request) {
-    const url = keyFor(request);
-    networkRequests.push(url);
+    const requestObject = typeof request === "string" ? new Request(request) : request;
+    const url = requestObject.url;
+    networkRequests.push({ url, cache: requestObject.cache });
     if (offline) throw new TypeError("offline");
     if (failPath && new URL(url).pathname.endsWith(failPath)) {
       return new Response("missing", { status: 404 });
     }
-    return new Response(`network:${new URL(url).pathname}`, { status: 200 });
+    const source = staleHttpCache && !["reload", "no-store"].includes(requestObject.cache)
+      ? "http-cache-old"
+      : staleHttpCache
+        ? "network-new"
+        : "network";
+    return new Response(`${source}:${new URL(url).pathname}`, { status: 200 });
   }
 
   function cacheFor(name) {
     if (!stores.has(name)) stores.set(name, new Map());
     const entries = stores.get(name);
     return {
-      async addAll(requests) {
-        const fetched = [];
-        for (const request of requests) {
-          const response = await network(request);
-          if (!response.ok) throw new TypeError(`Precache failed: ${keyFor(request)}`);
-          fetched.push([keyFor(request), response]);
+      async put(request, response) {
+        const url = keyFor(request);
+        cachePutRequests.push({ name, url });
+        if (
+          failCachePutPath &&
+          name === CURRENT_CACHE_NAME &&
+          new URL(url).pathname.endsWith(failCachePutPath)
+        ) {
+          throw new TypeError(`Cache write failed: ${url}`);
         }
-        for (const [key, response] of fetched) entries.set(key, response.clone());
+        entries.set(url, response.clone());
       },
       async match(request) {
         return entries.get(keyFor(request))?.clone();
@@ -147,7 +162,7 @@ function createServiceWorkerHarness({ failPath = null } = {}) {
       handlers.set(type, handler);
     },
   };
-  const context = { self, caches, fetch: network, URL, Response, console };
+  const context = { self, caches, fetch: network, Request, URL, Response, console };
 
   async function lifecycle(type) {
     let promise;
@@ -169,6 +184,7 @@ function createServiceWorkerHarness({ failPath = null } = {}) {
     stores,
     caches,
     networkRequests,
+    cachePutRequests,
     setOffline(value) { offline = value; },
     get skipWaitingCalls() { return skipWaitingCalls; },
     get claimCalls() { return claimCalls; },
@@ -278,6 +294,36 @@ test("service worker uses a build stamp and serves cold cached navigation and as
   assert.equal(await asset.text(), "network:/TrackMaster/css/app.css");
 });
 
+test("precache bypasses stale HTTP entries and stores fresh bytes under canonical keys", async () => {
+  const source = await text("sw.js");
+  const harness = createServiceWorkerHarness({ staleHttpCache: true });
+  await harness.evaluate(source);
+  await harness.lifecycle("install");
+
+  assert.equal(harness.networkRequests.length, precacheList(source).length);
+  assert.ok(
+    harness.networkRequests.every(({ url, cache }) =>
+      url.startsWith(ROOT_URL) && !url.includes("?") && cache === "reload"),
+    "every canonical scoped precache request bypasses the browser HTTP cache",
+  );
+
+  const freshCache = harness.stores.get(CURRENT_CACHE_NAME);
+  assert.ok(freshCache, "the fresh stamped cache exists after a complete install");
+  assert.ok([...freshCache.keys()].every((url) => url.startsWith(ROOT_URL) && !url.includes("?")));
+  assert.equal(
+    await (await freshCache.get(`${ROOT_URL}css/app.css`).clone()).text(),
+    "network-new:/TrackMaster/css/app.css",
+  );
+
+  harness.setOffline(true);
+  const cachedAsset = await harness.request({
+    method: "GET",
+    mode: "same-origin",
+    url: `${ROOT_URL}css/app.css`,
+  });
+  assert.equal(await cachedAsset.text(), "network-new:/TrackMaster/css/app.css");
+});
+
 test("activation removes only stale Apex builds and claims existing installs", async () => {
   const source = await text("sw.js");
   const harness = createServiceWorkerHarness();
@@ -288,18 +334,50 @@ test("activation removes only stale Apex builds and claims existing installs", a
   await harness.lifecycle("activate");
 
   const names = await harness.caches.keys();
-  assert.ok(names.includes("apex-lap-tracker-20260802-issue3-replay-init"));
+  assert.ok(names.includes(CURRENT_CACHE_NAME));
   assert.ok(!names.includes("apex-lap-tracker-20260731-old"));
   assert.ok(names.includes("other-application-cache"));
   assert.equal(harness.claimCalls, 1);
 });
 
-test("a failed precache entry prevents install activation from replacing the usable build", async () => {
+test("a failed fresh precache leaves the prior complete build usable", async () => {
+  const oldCacheName = "apex-lap-tracker-20260731-old";
   const harness = createServiceWorkerHarness({ failPath: "icons/icon-512.png" });
+  const oldCache = await harness.caches.open(oldCacheName);
+  await oldCache.put(`${ROOT_URL}index.html`, new Response("old-complete-build"));
+
   await harness.evaluate(await text("sw.js"));
   await assert.rejects(harness.lifecycle("install"), /Precache failed/);
+
   assert.equal(harness.skipWaitingCalls, 0);
   assert.equal(harness.claimCalls, 0);
+  assert.ok((await harness.caches.keys()).includes(oldCacheName));
+  assert.ok(!(await harness.caches.keys()).includes(CURRENT_CACHE_NAME));
+  assert.equal(
+    await (await oldCache.match(`${ROOT_URL}index.html`)).text(),
+    "old-complete-build",
+  );
+});
+
+test("a failed precache cache write rolls back the incomplete build and preserves the prior cache", async () => {
+  const oldCacheName = "apex-lap-tracker-20260731-old";
+  const harness = createServiceWorkerHarness({ failCachePutPath: "icons/icon-512.png" });
+  const oldCache = await harness.caches.open(oldCacheName);
+  await oldCache.put(`${ROOT_URL}index.html`, new Response("old-complete-build"));
+
+  await harness.evaluate(await text("sw.js"));
+  await assert.rejects(harness.lifecycle("install"), /Cache write failed/);
+
+  const currentWrites = harness.cachePutRequests.filter(({ name }) => name === CURRENT_CACHE_NAME);
+  assert.ok(currentWrites.length > 1, "the failed write follows earlier successful cache writes");
+  assert.ok(currentWrites.some(({ url }) => url.endsWith("icons/icon-512.png")));
+  assert.equal(harness.skipWaitingCalls, 0);
+  assert.ok((await harness.caches.keys()).includes(oldCacheName));
+  assert.ok(!(await harness.caches.keys()).includes(CURRENT_CACHE_NAME));
+  assert.equal(
+    await (await oldCache.match(`${ROOT_URL}index.html`)).text(),
+    "old-complete-build",
+  );
 });
 
 test("fetch ignores non-GET, cross-origin, and out-of-scope requests and never runtime-caches misses", async () => {
