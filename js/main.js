@@ -38,7 +38,7 @@ import { shouldDestroySensorsOnPageHide } from "./page-lifecycle.js";
 import { registerServiceWorker } from "./register-service-worker.js";
 import { createBrowserSensorSource, SENSOR_STATUS } from "./sensors/sensor-source.js";
 import { calculateBubbleOffset } from "./sensors/spirit-level.js";
-import { createRaceWakeLock } from "./sensors/wake-lock.js";
+import { createRaceWakeLock, WAKE_LOCK_STATE } from "./sensors/wake-lock.js";
 import { createLeanGaugeRenderer } from "./ui/lean-gauge.js";
 import { renderRunReport } from "./ui/run-report.js";
 
@@ -73,6 +73,7 @@ const readySpeedValue = document.querySelector("[data-speed-value]");
 const readyGpsWarning = document.querySelector("[data-gps-warning]");
 const raceSpeedValue = document.querySelector("[data-race-speed-value]");
 const raceGpsWarning = document.querySelector("[data-race-gps-warning]");
+const wakeLockStatus = document.querySelector("[data-wake-lock-status]");
 const raceTime = document.querySelector("[data-race-time]");
 const lapNumber = document.querySelector("[data-lap-number]");
 const lastLap = document.querySelector("[data-last-lap]");
@@ -88,6 +89,19 @@ const raceLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-race
 const sessionRecorder = createSessionRecorder({ nowRef: monotonicNow });
 const raceWakeLock = createRaceWakeLock();
 const runStore = createRunStore();
+
+function renderWakeLockStatus(state) {
+  const messages = {
+    [WAKE_LOCK_STATE.HELD]: "KEEP AWAKE ON",
+    [WAKE_LOCK_STATE.UNSUPPORTED]: "KEEP AWAKE UNSUPPORTED · SET IOS AUTO-LOCK TO NEVER",
+    [WAKE_LOCK_STATE.REJECTED]: "KEEP AWAKE OFF · REQUEST REJECTED · SET IOS AUTO-LOCK TO NEVER",
+    [WAKE_LOCK_STATE.RELEASED]: "KEEP AWAKE OFF · REACQUIRING",
+  };
+  wakeLockStatus.dataset.state = state;
+  wakeLockStatus.textContent = messages[state];
+}
+
+raceWakeLock.subscribe(renderWakeLockStatus);
 
 let currentState = "enable";
 let lastGyroReceivedAt = null;

@@ -1134,6 +1134,42 @@ h1 {
   letter-spacing: 3px;
 }
 
+.wake-lock-status {
+  position: absolute;
+  z-index: 2;
+  top: max(16px, var(--safe-block-start));
+  left: 50%;
+  max-width: min(48vw, 440px);
+  margin: 0;
+  padding: 5px 9px;
+  transform: translateX(-50%);
+  overflow: hidden;
+  border: 1px solid rgba(255, 200, 92, 0.8);
+  border-radius: 3px;
+  background: rgba(70, 42, 8, 0.9);
+  color: #ffc85c;
+  font-family: "Space Mono", monospace;
+  font-size: clamp(8px, 1.7vmin, 11px);
+  font-weight: 700;
+  letter-spacing: 1px;
+  line-height: 1.25;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wake-lock-status[data-state="held"] {
+  border-color: rgba(182, 255, 46, 0.7);
+  background: rgba(35, 62, 8, 0.9);
+  color: var(--accent);
+}
+
+.wake-lock-status[data-state="rejected"] {
+  border-color: rgba(255, 77, 77, 0.9);
+  background: rgba(82, 18, 18, 0.94);
+  color: #fff;
+}
+
 .rec-indicator span {
   width: 9px;
   aspect-ratio: 1;

@@ -1,3 +1,11 @@
+/** States exposed while a race owns (or tries to own) the screen wake lock. */
+export const WAKE_LOCK_STATE = Object.freeze({
+  HELD: "held",
+  UNSUPPORTED: "unsupported",
+  REJECTED: "rejected",
+  RELEASED: "released",
+});
+
 /** Owns the screen wake lock only while a race is active. */
 export function createRaceWakeLock({
   navigatorRef = globalThis.navigator,
@@ -6,6 +14,14 @@ export function createRaceWakeLock({
   let active = false;
   let sentinel = null;
   let pendingRequest = null;
+  let state = WAKE_LOCK_STATE.RELEASED;
+  const listeners = new Set();
+
+  function setState(nextState) {
+    if (state === nextState) return;
+    state = nextState;
+    for (const listener of listeners) listener(state);
+  }
 
   function pageIsVisible() {
     return documentRef?.visibilityState !== "hidden";
@@ -17,30 +33,46 @@ export function createRaceWakeLock({
 
   function handleRelease(event) {
     const released = event?.currentTarget ?? sentinel;
+    if (sentinel !== released) return;
     detach(released);
-    if (sentinel === released) sentinel = null;
+    sentinel = null;
+    setState(WAKE_LOCK_STATE.RELEASED);
     if (active && pageIsVisible()) void acquire();
   }
 
   async function acquire() {
-    if (!active || !pageIsVisible() || sentinel) return sentinel;
-    // Adopt the in-flight request rather than returning the currently-null
-    // sentinel. Restart logic must observe its eventual success or rejection.
+    if (!active || !pageIsVisible() || sentinel) return state;
+    // Adopt the in-flight request rather than starting a duplicate request.
     if (pendingRequest) return pendingRequest;
-    if (typeof navigatorRef?.wakeLock?.request !== "function") return null;
+    if (typeof navigatorRef?.wakeLock?.request !== "function") {
+      setState(WAKE_LOCK_STATE.UNSUPPORTED);
+      return state;
+    }
 
     pendingRequest = Promise.resolve()
       .then(() => navigatorRef.wakeLock.request("screen"))
       .then(async (nextSentinel) => {
+        if (!nextSentinel) throw new TypeError("Screen Wake Lock returned no sentinel.");
         if (!active || !pageIsVisible()) {
-          await nextSentinel?.release?.();
-          return null;
+          try {
+            await nextSentinel.release?.();
+          } catch {
+            // A lock discarded during a race transition may already be released.
+          }
+          if (!active || !sentinel) setState(WAKE_LOCK_STATE.RELEASED);
+          return state;
         }
         sentinel = nextSentinel;
-        sentinel?.addEventListener?.("release", handleRelease);
-        return sentinel;
+        sentinel.addEventListener?.("release", handleRelease);
+        setState(WAKE_LOCK_STATE.HELD);
+        return state;
       })
-      .catch(() => null)
+      .catch(() => {
+        // A rejection is meaningful only while this race remains eligible to hold a lock.
+        if (active && pageIsVisible() && !sentinel) setState(WAKE_LOCK_STATE.REJECTED);
+        else if (!sentinel) setState(WAKE_LOCK_STATE.RELEASED);
+        return state;
+      })
       .finally(() => {
         pendingRequest = null;
       });
@@ -48,7 +80,20 @@ export function createRaceWakeLock({
   }
 
   function handleVisibilityChange() {
-    if (active && pageIsVisible()) void acquire();
+    if (!pageIsVisible()) {
+      // A screen lock cannot be relied on in a hidden document. Relinquish our
+      // reference immediately so a visible restore always obtains a fresh lock.
+      const current = sentinel;
+      if (!current) return;
+      sentinel = null;
+      detach(current);
+      setState(WAKE_LOCK_STATE.RELEASED);
+      void Promise.resolve().then(() => current.release?.()).catch(() => {
+        // The browser may have already released this sentinel on hide.
+      });
+      return;
+    }
+    if (active) void acquire();
   }
 
   documentRef?.addEventListener?.("visibilitychange", handleVisibilityChange);
@@ -63,7 +108,7 @@ export function createRaceWakeLock({
     if (inheritedRequest && active && pageIsVisible() && !sentinel) {
       return acquire();
     }
-    return sentinel;
+    return state;
   }
 
   async function stop() {
@@ -74,6 +119,7 @@ export function createRaceWakeLock({
     const current = sentinel;
     sentinel = null;
     detach(current);
+    setState(WAKE_LOCK_STATE.RELEASED);
     const pending = pendingRequest;
     try {
       await current?.release?.();
@@ -88,5 +134,19 @@ export function createRaceWakeLock({
     await stop();
   }
 
-  return Object.freeze({ start, stop, destroy, isActive: () => active });
+  function subscribe(listener) {
+    if (typeof listener !== "function") throw new TypeError("Wake-lock listener must be a function.");
+    listeners.add(listener);
+    listener(state);
+    return () => listeners.delete(listener);
+  }
+
+  return Object.freeze({
+    start,
+    stop,
+    destroy,
+    subscribe,
+    getState: () => state,
+    isActive: () => active,
+  });
 }

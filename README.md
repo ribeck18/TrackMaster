@@ -67,6 +67,14 @@ If a permission was denied, the web page usually cannot show the prompt again:
 
 Permission labels vary slightly by iOS release. The denied-state screen repeats the in-app recovery direction and always permits continuing with available sensors.
 
+## Race keep-awake status
+
+Screen Wake Lock requires **iOS/iPadOS 16.4 or later** in Safari or the installed Apex web app; this is Apex's minimum supported iOS version for automatic keep-awake during Race. Race shows **KEEP AWAKE ON** only while it holds a screen-wake-lock sentinel. **KEEP AWAKE UNSUPPORTED** means the browser does not expose the API, while **KEEP AWAKE OFF · REQUEST REJECTED** means a request was rejected and no lock is held. Both are non-fatal to lap timing, but neither is a claim that the display will stay on.
+
+On a supported iOS/iPadOS version, use this manual fallback when either warning appears: keep Apex in the foreground and set **Settings → Display & Brightness → Auto-Lock → Never** for the session, then restore the prior Auto-Lock setting afterward. A visibility restoration or platform sentinel release automatically retries the API request; keep the warning visible until it changes to **KEEP AWAKE ON**.
+
+Physical-device wake-lock validation is a release check, not something automated tests can fake: on a supported iPhone or iPad, start Race, verify **KEEP AWAKE ON**, background and restore Apex, and verify it returns to **ON**. Also exercise an unsupported or rejected condition and verify the matching warning and manual fallback guidance before release.
+
 ## Prove cold offline operation before the track
 
 This physical-iPhone check is required; desktop tests cannot substitute for it.
@@ -140,7 +148,7 @@ Do not diagnose the display while riding. Use only interactions permitted by the
 - [ ] With the bike fully upright and stationary, enable sensors and wait for **READY TO ZERO** before tapping **ZERO NOW**.
 - [ ] Confirm upright lean settles near `0°`. Re-zero after any mount movement.
 - [ ] Outdoors, distinguish `GPS · NO FIX`/`--` from a valid stationary `0 MPH`; do not start the validation session until fixes arrive.
-- [ ] Confirm native landscape, safe-area clearance, readable contrast, and that the screen remains awake during Race.
+- [ ] Confirm native landscape, safe-area clearance, readable contrast, and **KEEP AWAKE ON** during Race. Background and restore Apex, then verify it reacquires **ON**; if it shows unsupported or rejected, use the documented Auto-Lock fallback and record the failure.
 - [ ] On a safe straight, compare speed trend with the bike/dashboard or video reference; review exact values later.
 - [ ] Make deliberate lap taps and compare untrimmed times with the transponder. Use report trim only to correct tap timing (±0.5 s boundary model).
 
@@ -168,4 +176,4 @@ One anomalous corner is not enough to tune constants: bumps, camber, rider line,
 
 `npm test` statically verifies relative PWA metadata and runtime assets and deterministically executes service-worker install, activate, fetch, failure, cleanup, navigation, and update behavior. It also preserves the existing sensor, timing, report, trim, map, and export test suite. Syntax/JSON/PNG checks verify deployable file structure.
 
-Automation cannot enable GitHub Pages, add an icon to a physical iPhone, prove iOS standalone chrome behavior, reproduce Safari storage eviction, grant/recover real permissions, obtain a satellite fix without data, measure device sensor cadence, validate Wake Lock/thermal behavior, exercise every share-sheet destination, or establish true motorcycle lean on track. The cold-offline and first-track-day checklists are therefore release gates, not claims already proven by unit tests.
+Automation cannot enable GitHub Pages, add an icon to a physical iPhone, prove iOS standalone chrome behavior, reproduce Safari storage eviction, grant/recover real permissions, obtain a satellite fix without data, measure device sensor cadence, validate Wake Lock/thermal behavior, exercise every share-sheet destination, or establish true motorcycle lean on track. In particular, wake-lock unit tests cover state transitions and races, not a physical display staying awake; the documented physical-device wake-lock check is a release gate. The cold-offline and first-track-day checklists are therefore release gates, not claims already proven by unit tests.

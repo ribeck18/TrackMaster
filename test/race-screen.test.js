@@ -9,6 +9,7 @@ const main = await readFile(new URL("../js/main.js", import.meta.url), "utf8");
 test("Race reproduces the high-fidelity glanceable instrument layout", () => {
   assert.match(html, /class="screen race-screen" data-screen="race"/);
   assert.match(html, /class="rec-indicator"><span><\/span>REC/);
+  assert.match(html, /data-wake-lock-status data-state="released" role="status" aria-atomic="true">KEEP AWAKE OFF · REACQUIRING/);
   assert.match(html, /class="end-button"[^>]*>END RACE/);
   assert.match(html, /class="speed-value race-speed-value"/);
   assert.match(html, /data-race-lean-instrument/);
@@ -24,7 +25,16 @@ test("Race reproduces the high-fidelity glanceable instrument layout", () => {
   assert.match(css, /\.end-button \{[\s\S]*?right: max\(40px, var\(--safe-inline-end\)\)/);
   assert.match(css, /\.race-tap-prompt \{[\s\S]*?bottom: min\(92px, 20\.7vmin\)/);
   assert.match(css, /\.race-bottom \{[\s\S]*?height: min\(82px, 18\.5vmin\)/);
+  assert.match(css, /\.wake-lock-status\[data-state="held"\]/);
+  assert.match(css, /\.wake-lock-status\[data-state="rejected"\]/);
   assert.match(css, /@keyframes rec-pulse/);
+});
+
+test("Race renders explicit wake-lock states and manual fallback guidance", () => {
+  assert.match(main, /raceWakeLock\.subscribe\(renderWakeLockStatus\)/);
+  assert.match(main, /KEEP AWAKE ON/);
+  assert.match(main, /KEEP AWAKE UNSUPPORTED · SET IOS AUTO-LOCK TO NEVER/);
+  assert.match(main, /KEEP AWAKE OFF · REQUEST REJECTED · SET IOS AUTO-LOCK TO NEVER/);
 });
 
 test("Ready and Race render speed and lean from the same source snapshots", () => {

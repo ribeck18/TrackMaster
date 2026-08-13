@@ -11,7 +11,7 @@ import {
 } from "../js/register-service-worker.js";
 
 const ROOT_URL = "https://example.test/TrackMaster/";
-const CURRENT_CACHE_NAME = "apex-lap-tracker-20260802-issue17-http-cache";
+const CURRENT_CACHE_NAME = "apex-lap-tracker-20260803-issue18-wake-lock";
 
 async function text(file) {
   return readFile(new URL(`../${file}`, import.meta.url), "utf8");
