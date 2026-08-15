@@ -92,10 +92,15 @@ const DEFAULT_CALIBRATION_OPTIONS = Object.freeze({
   minimumSpanMs: 400,
   minimumSamples: 5,
   maximumAgeMs: 300,
-  minimumGravity: 8.8,
-  maximumGravity: 10.8,
-  maximumRateDps: 3,
-  maximumDirectionSpreadDegrees: 3,
+  // The gravity band and rate ceiling gate "held upright and still". They are
+  // deliberately loose enough to tolerate idle engine vibration and normal hand
+  // tremor while a rider steadies a bar-mounted phone; a genuine reposition
+  // still exceeds them. Tight limits here were the main reason ZERO took several
+  // attempts on a running bike.
+  minimumGravity: 8.5,
+  maximumGravity: 11,
+  maximumRateDps: 10,
+  maximumDirectionSpreadDegrees: 5,
 });
 
 function motionGravity(sample) {
@@ -147,10 +152,12 @@ export function createBikeFrameCalibrationWindow({
       gravityMagnitude <= config.maximumGravity &&
       magnitude(rate) <= config.maximumRateDps;
 
-    if (!valid) {
-      readings = [];
-      return snapshot(receivedAt);
-    }
+    // Drop a single out-of-band sample (a vibration spike or brief bump) instead
+    // of discarding the whole window, so one bad reading no longer restarts the
+    // 5-sample accumulation. Sustained disturbance still blocks ZERO: the latest
+    // accepted reading ages out past maximumAgeMs, and the next accepted sample's
+    // window filter purges anything older than windowMs.
+    if (!valid) return snapshot(receivedAt);
 
     readings.push({ receivedAt, gravity, direction: normalize(gravity) });
     readings = readings.filter((reading) => receivedAt - reading.receivedAt <= config.windowMs);

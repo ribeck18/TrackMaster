@@ -265,10 +265,29 @@ test("ZERO window requires recent stable gravity and gyro and averages accepted 
   assert.ok(window.snapshot().gravity.x > 0 && window.snapshot().gravity.x < 0.02);
   now += 301;
   assert.equal(window.snapshot().ready, false, "old stable samples cannot be zeroed");
-  window.add(bodyMotion(800, { rollRate: 8 }));
-  assert.equal(window.snapshot().ready, false, "high-rate motion resets stability");
-  window.add(bodyMotion(900, { gravity: { x: 0, y: 5, z: G } }));
+  window.add(bodyMotion(800, { rollRate: 20 }));
+  assert.equal(window.snapshot().ready, false, "high-rate motion is not a stable sample");
+  window.add(bodyMotion(900, { gravity: { x: 0, y: 6, z: G } }));
   assert.equal(window.snapshot().ready, false, "non-gravity acceleration magnitude is rejected");
+});
+
+test("a lone disturbed sample is dropped without discarding the ZERO window", () => {
+  let now = 0;
+  const window = createBikeFrameCalibrationWindow({ nowRef: () => now });
+  for (let index = 0; index <= 5; index += 1) {
+    now = index * 100;
+    window.add(bodyMotion(now, { gravity: { x: 0, y: 0, z: G } }), now);
+  }
+  assert.equal(window.snapshot(now).ready, true, "a quiet hold reaches READY TO ZERO");
+
+  // A single vibration spike must not wipe the accumulated window: one good
+  // sample immediately after keeps the hold ready instead of forcing a fresh
+  // five-sample rebuild (which is what the old hard reset required).
+  now = 560;
+  window.add(bodyMotion(now, { rollRate: 40 }), now);
+  now = 580;
+  window.add(bodyMotion(now, { gravity: { x: 0, y: 0, z: G } }), now);
+  assert.equal(window.snapshot(now).ready, true, "recovery does not restart accumulation");
 });
 
 test("gyro delivery watchdog detects outage and recovery using monotonic reception time", () => {
