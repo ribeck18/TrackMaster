@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   captureBikeFrame,
-  createBikeFrameCalibrationWindow,
+  createBikeFrameCalibrationCapture,
   dot,
   magnitude,
 } from "../js/core/bike-frame.js";
@@ -251,43 +251,69 @@ test("motion-only remains responsive and silent GPS gaps disable the anchor", ()
   assert.ok(reading.leanDegrees < 0);
 });
 
-test("ZERO window requires recent stable gravity and gyro and averages accepted samples", () => {
+test("ZERO capture starts on tap and averages a short stable sample set", () => {
   let now = 0;
-  const window = createBikeFrameCalibrationWindow({ nowRef: () => now });
-  for (let index = 0; index < 7; index += 1) {
+  const capture = createBikeFrameCalibrationCapture({ nowRef: () => now });
+  assert.equal(capture.start().status, "capturing", "ZERO does not wait for pre-existing readiness");
+  for (let index = 0; index <= 10; index += 1) {
     now = index * 100;
-    window.add(bodyMotion(index * 100, {
+    capture.add(bodyMotion(now, {
       rollRate: index % 2 ? 0.1 : -0.1,
       gravity: { x: 0.02 * (index % 2), y: 0, z: G },
     }));
   }
-  assert.equal(window.snapshot().ready, true);
-  assert.ok(window.snapshot().gravity.x > 0 && window.snapshot().gravity.x < 0.02);
-  now += 301;
-  assert.equal(window.snapshot().ready, false, "old stable samples cannot be zeroed");
-  window.add(bodyMotion(800, { rollRate: 20 }));
-  assert.equal(window.snapshot().ready, false, "high-rate motion is not a stable sample");
-  window.add(bodyMotion(900, { gravity: { x: 0, y: 6, z: G } }));
-  assert.equal(window.snapshot().ready, false, "non-gravity acceleration magnitude is rejected");
+  const result = capture.snapshot(now);
+  assert.equal(result.status, "captured");
+  assert.ok(result.gravity.x > 0 && result.gravity.x < 0.02);
 });
 
-test("a lone disturbed sample is dropped without discarding the ZERO window", () => {
+test("ZERO capture drops an isolated vibration spike", () => {
   let now = 0;
-  const window = createBikeFrameCalibrationWindow({ nowRef: () => now });
-  for (let index = 0; index <= 5; index += 1) {
+  const capture = createBikeFrameCalibrationCapture({ nowRef: () => now });
+  capture.start();
+  for (let index = 0; index <= 10; index += 1) {
     now = index * 100;
-    window.add(bodyMotion(now, { gravity: { x: 0, y: 0, z: G } }), now);
+    capture.add(bodyMotion(now, { rollRate: index === 5 ? 40 : 0 }), now);
   }
-  assert.equal(window.snapshot(now).ready, true, "a quiet hold reaches READY TO ZERO");
+  assert.equal(capture.snapshot(now).status, "captured");
+});
 
-  // A single vibration spike must not wipe the accumulated window: one good
-  // sample immediately after keeps the hold ready instead of forcing a fresh
-  // five-sample rebuild (which is what the old hard reset required).
-  now = 560;
-  window.add(bodyMotion(now, { rollRate: 40 }), now);
-  now = 580;
-  window.add(bodyMotion(now, { gravity: { x: 0, y: 0, z: G } }), now);
-  assert.equal(window.snapshot(now).ready, true, "recovery does not restart accumulation");
+test("ZERO capture cancels without usable evidence, sustained motion, or repositioning", () => {
+  let now = 0;
+  const capture = createBikeFrameCalibrationCapture({ nowRef: () => now });
+  capture.start();
+  for (let index = 0; index < 3; index += 1) {
+    now = index * 100;
+    capture.add(bodyMotion(now), now);
+  }
+  assert.deepEqual(capture.snapshot(1_000), {
+    status: "cancelled",
+    reason: "INSUFFICIENT USABLE MOTION",
+    gravity: null,
+  });
+
+  capture.start(2_000);
+  for (let index = 0; index < 3; index += 1) {
+    now = 2_000 + index * 100;
+    capture.add(bodyMotion(now, { rollRate: 40 }), now);
+  }
+  assert.deepEqual(capture.snapshot(now), {
+    status: "cancelled",
+    reason: "SUSTAINED MOTION",
+    gravity: null,
+  });
+
+  capture.start(3_000);
+  capture.add(bodyMotion(3_000), 3_000);
+  for (let index = 1; index <= 3; index += 1) {
+    now = 3_000 + index * 100;
+    capture.add(bodyMotion(now, { gravity: { x: 2, y: 0, z: G } }), now);
+  }
+  assert.deepEqual(capture.snapshot(now), {
+    status: "cancelled",
+    reason: "REPOSITION BIKE",
+    gravity: null,
+  });
 });
 
 test("gyro delivery watchdog detects outage and recovery using monotonic reception time", () => {
