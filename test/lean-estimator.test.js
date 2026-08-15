@@ -267,13 +267,18 @@ test("ZERO capture starts on tap and averages a short stable sample set", () => 
   assert.ok(result.gravity.x > 0 && result.gravity.x < 0.02);
 });
 
-test("ZERO capture drops an isolated vibration spike", () => {
+test("ZERO capture drops isolated vibration and first-reading direction transients", () => {
   let now = 0;
   const capture = createBikeFrameCalibrationCapture({ nowRef: () => now });
   capture.start();
   for (let index = 0; index <= 10; index += 1) {
     now = index * 100;
-    capture.add(bodyMotion(now, { rollRate: index === 5 ? 40 : 0 }), now);
+    capture.add(bodyMotion(now, {
+      rollRate: index === 5 ? 40 : 0,
+      gravity: index === 0
+        ? { x: G * Math.sin(Math.PI / 30), y: 0, z: G * Math.cos(Math.PI / 30) }
+        : undefined,
+    }), now);
   }
   assert.equal(capture.snapshot(now).status, "captured");
 });
@@ -304,8 +309,10 @@ test("ZERO capture cancels without usable evidence, sustained motion, or reposit
   });
 
   capture.start(3_000);
-  capture.add(bodyMotion(3_000), 3_000);
-  for (let index = 1; index <= 3; index += 1) {
+  for (let index = 0; index < 2; index += 1) {
+    capture.add(bodyMotion(3_000 + index * 100), 3_000 + index * 100);
+  }
+  for (let index = 2; index <= 4; index += 1) {
     now = 3_000 + index * 100;
     capture.add(bodyMotion(now, { gravity: { x: 2, y: 0, z: G } }), now);
   }

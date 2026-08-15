@@ -314,6 +314,12 @@ test("record/export/load/replay restores calibration and pre-race estimator stat
       speed: 20,
       heading: 0,
     },
+    {
+      type: "motion",
+      timestamp: 55,
+      accelerationIncludingGravity: gravity,
+      rotationRate: { x: 0, y: 0, z: -8 },
+    },
   ];
   const initializationSamples = [
     {
@@ -466,6 +472,14 @@ test("record/export/load/replay restores calibration and pre-race estimator stat
   assert.ok(initializeAt >= 0 && initializeAt < sessionStartAt);
   assert.ok(sessionStartAt < releaseRaceAt, "the app records before Race sample 1 is released");
   assert.match(mainSource, /leanEstimator\.calibrate\(replayInitialization\.action\.gravity\)/);
+  const motionHandler = mainSource.slice(
+    mainSource.indexOf('if (sample.type === "motion")'),
+    mainSource.indexOf("captureSessionSample(sample", mainSource.indexOf('if (sample.type === "motion")')),
+  );
+  assert.ok(
+    motionHandler.indexOf("leanEstimator.update(sample)") < motionHandler.indexOf("finishCalibrationCapture(captureOutcome)"),
+    "the recorded terminal capture sample is estimated before live calibration",
+  );
 });
 
 test("degraded GPS-only, no-sensor, and gyro-stall recordings emit gated v2 no-lean replays", async () => {

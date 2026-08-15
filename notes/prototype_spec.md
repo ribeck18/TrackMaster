@@ -54,11 +54,11 @@ The app is **one page** with **four mutually-exclusive states**: `cal` (Calibrat
 - **Layout:** Single centered column, vertically and horizontally centered, `gap: 18px`, text centered. Content left-padded ~62px for the notch inset.
 - **Components (top → bottom):**
   - **Eyebrow label:** `STEP 1 · CALIBRATE` — Space Mono, 12px, `letter-spacing: 3px`, color `#b6ff2e` (accent green), `margin-top: 40px`.
-  - **Level indicator:** A 118×118px circle, `border: 2px solid rgba(255,255,255,.18)`, containing a horizontal + vertical crosshair line (`rgba(255,255,255,.14)`), a 74px dashed inner ring (`rgba(255,255,255,.16)`), and a **green bubble dot** — 22px circle, `#b6ff2e`, glow `box-shadow: 0 0 18px rgba(182,255,46,.6)`, offset `transform: translate(9px,-6px)` to depict an off-level bubble. In production this bubble should move live with the phone's tilt (a real spirit-level), settling to center when level.
-  - **Title:** `LEVEL & ZERO SENSORS` — Rajdhani 700, 38px, `letter-spacing: 1px`.
-  - **Body copy:** `Mount your phone and hold the bike fully upright. Tap zero to set the current position as 0° lean.` — Rajdhani, 17px, `color: rgba(255,255,255,.55)`, `line-height: 1.35`, `max-width: 520px`.
+  - **Calibration guidance:** No live phone-level visual. Tell the rider to hold the bike fully upright and still while the tap-initiated capture runs.
+  - **Title:** `ZERO LEAN SENSOR` — Rajdhani 700, 38px, `letter-spacing: 1px`.
+  - **Body copy:** `Mount your phone. Hold the BIKE upright while zero is captured.` — Rajdhani, 17px, `color: rgba(255,255,255,.55)`, `line-height: 1.35`, `max-width: 520px`.
   - **ZERO NOW button:** green pill. Background `#b6ff2e`, text `#0a0b0d`, Rajdhani 700, 22px, `letter-spacing: 3px`, `padding: 16px 58px`, `border-radius: 40px`, `box-shadow: 0 0 30px rgba(182,255,46,.35)`.
-- **Action:** Tapping **ZERO NOW** captures the current sensor orientation as the zero reference and advances to **Ready**.
+- **Action:** Tapping **ZERO NOW** starts a roughly one-second stable gravity-and-gyro capture; on success it advances to **Ready**.
 
 ### 2. Ready (`ready`) — calibrated, idle
 - **Purpose:** Sensors are zeroed; the rider is stopped and ready to start a session. Shows live gauges at rest so the rider can confirm zeroing worked (bike upright should read ~0°).
@@ -156,8 +156,8 @@ Prototype state (extend for production): `screen` (`cal|ready|race|report`), `la
 This is the real work behind the static prototype:
 
 1. **GPS speed** — use the Geolocation API (`watchPosition`, `enableHighAccuracy: true`). Prefer the `coords.speed` value (m/s) when present; otherwise derive speed from successive positions. Convert to **MPH** (`m/s × 2.23694`). Smooth lightly to avoid jitter. Display `0` when stationary/no fix.
-2. **Lean angle** — use `DeviceOrientationEvent` (and/or `DeviceMotionEvent`) from the phone's IMU. On iOS Safari this requires an explicit **user-gesture permission prompt** (`DeviceOrientationEvent.requestPermission()`) — trigger it on the calibrate screen / first tap. Compute the roll relative to the **captured zero reference** so lean is 0° when the bike is upright regardless of mount angle. Sign the result: left = negative, right = positive. Clamp/expect a usable range around ±60°.
-3. **Calibration/zeroing** — on "ZERO NOW", snapshot the current orientation and store it as the reference; all subsequent lean readings are relative to it. Also drive the spirit-level bubble on the calibrate screen from live tilt.
+2. **Lean angle** — use `DeviceMotionEvent` from the phone's IMU after the explicit permission gesture. Compute fused lean relative to the **captured bike frame** so lean is 0° when the bike is upright regardless of mount angle. Sign the result: left = negative, right = positive. Clamp/expect a usable range around ±60°.
+3. **Calibration/zeroing** — on "ZERO NOW", collect a roughly one-second stable gravity-and-gyro sample set while the bike is upright, then store its averaged bike frame as the reference; all subsequent lean readings are relative to it.
 4. **Lap timer** — high-resolution running timer (use `performance.now()`), formatted `MM:SS.d` (minutes:seconds.tenths). Reset per lap on tap; keep a list of completed lap durations.
 5. **Report computation** — on END RACE, compute from the recorded sample buffer: max/avg speed, max lean left & right, per-lap times + best, and the top-speed point (value + GPS coord) for the map marker.
 6. **Track map** — plot the recorded GPS polyline and place a marker at the top-speed sample. (Any map/canvas rendering of the lat/lng path; the prototype uses a striped placeholder.)

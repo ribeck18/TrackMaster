@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "apex-lap-tracker-";
-const BUILD_STAMP = "20260815-issue22-zero-capture";
+const BUILD_STAMP = "20260815-issue22-zero-capture-review-fixes";
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_STAMP}`;
 
 // Keep this list explicit: a successful install means the complete application

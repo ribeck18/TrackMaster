@@ -313,10 +313,12 @@ function handleSensorSample(sample) {
       lastGyroReceivedAt = monotonicNow();
     }
     const captureOutcome = calibrationCapture.add(sample, monotonicNow());
+    // The terminal capture sample is recorded and estimated before its zero is
+    // applied, matching replay's recorded pre-action delivery.
+    leanEstimator.update(sample);
     if (calibrationCaptureActive && captureOutcome.status !== "capturing") {
       finishCalibrationCapture(captureOutcome);
     }
-    leanEstimator.update(sample);
   }
 
   captureSessionSample(sample, { acceptedLocation });

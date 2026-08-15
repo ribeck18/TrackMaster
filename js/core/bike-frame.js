@@ -135,6 +135,8 @@ export function createBikeFrameCalibrationCapture({
 
   let startedAt = null;
   let readings = [];
+  let pendingReading = null;
+  let baseline = null;
   let consecutiveDisturbances = 0;
   let terminal = null;
 
@@ -178,6 +180,8 @@ export function createBikeFrameCalibrationCapture({
     if (!Number.isFinite(receivedAt)) throw new RangeError("Calibration capture start time must be finite.");
     startedAt = receivedAt;
     readings = [];
+    pendingReading = null;
+    baseline = null;
     consecutiveDisturbances = 0;
     terminal = null;
     return snapshot(receivedAt);
@@ -195,22 +199,29 @@ export function createBikeFrameCalibrationCapture({
     const direction = gravity && gravityMagnitude >= config.minimumGravity
       ? normalize(gravity)
       : null;
-    const baseline = readings[0]?.direction;
     const minimumCosine = Math.cos((config.maximumDirectionSpreadDegrees * Math.PI) / 180);
-    const repositioning = baseline && direction && dot(direction, baseline) < minimumCosine;
-    const valid =
+    const individuallyValid =
       gravity &&
       rate &&
       gravityMagnitude >= config.minimumGravity &&
       gravityMagnitude <= config.maximumGravity &&
-      magnitude(rate) <= config.maximumRateDps &&
-      !repositioning;
+      magnitude(rate) <= config.maximumRateDps;
+    const repositioning = baseline && direction && dot(direction, baseline) < minimumCosine;
 
-    if (!valid) {
+    if (!individuallyValid || repositioning) {
       consecutiveDisturbances += 1;
       if (consecutiveDisturbances > config.maximumConsecutiveDisturbances) {
         return cancel(repositioning ? "REPOSITION BIKE" : "SUSTAINED MOTION");
       }
+    } else if (!baseline) {
+      const reading = { receivedAt, gravity, direction };
+      if (pendingReading && dot(direction, pendingReading.direction) >= minimumCosine) {
+        baseline = pendingReading.direction;
+        readings.push(pendingReading, reading);
+      } else {
+        pendingReading = reading;
+      }
+      consecutiveDisturbances = 0;
     } else {
       consecutiveDisturbances = 0;
       readings.push({ receivedAt, gravity, direction });
