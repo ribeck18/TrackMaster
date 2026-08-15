@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#08090a">
+    <meta name="color-scheme" content="dark">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Apex">
+    <title>Apex Lap Tracker</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-icon" sizes="180x180" href="./icons/icon-180.png">
+    <link rel="stylesheet" href="./css/app.css">
+    <script type="module" src="./js/main.js"></script>
+  </head>
+  <body>
+    <main id="app" class="app-shell">
+      <p class="rotation-lock-hint">For the native view, disable Rotation Lock and turn your phone sideways.</p>
+
+      <section class="screen gate-screen" data-screen="enable" aria-labelledby="enable-title">
+        <div class="centered-content">
+          <p class="eyebrow">STEP 1 · PERMISSIONS</p>
+          <div class="sensor-mark" aria-hidden="true">
+            <span class="sensor-mark__core"></span>
+            <span class="sensor-mark__orbit sensor-mark__orbit--one"></span>
+            <span class="sensor-mark__orbit sensor-mark__orbit--two"></span>
+          </div>
+          <h1 id="enable-title" tabindex="-1">ENABLE SENSORS</h1>
+          <p class="screen-copy">Apex uses motion and location while you ride to measure lean angle and speed. Your run stays on this phone.</p>
+          <div class="sensor-status" aria-label="Sensor permission status">
+            <p>MOTION <strong data-permission="motion" data-status="idle">NOT REQUESTED</strong></p>
+            <p>LOCATION <strong data-permission="location" data-status="idle">NOT REQUESTED</strong></p>
+          </div>
+          <button class="primary-button" type="button" data-action="enable">ENABLE SENSORS</button>
+          <p class="meta-note">You can continue if a sensor is unavailable.</p>
+        </div>
+      </section>
+
+      <section class="screen gate-screen" data-screen="cal" aria-labelledby="calibrate-title" hidden>
+        <div class="centered-content calibrate-content">
+          <p class="eyebrow">STEP 2 · CALIBRATE</p>
+          <div class="level" data-spirit-level aria-label="Live spirit level">
+            <span class="level__horizontal"></span>
+            <span class="level__vertical"></span>
+            <span class="level__ring"></span>
+            <span class="level__bubble"></span>
+            <span class="level__unavailable" hidden>MOTION N/A</span>
+          </div>
+          <h1 id="calibrate-title" tabindex="-1">LEVEL &amp; ZERO SENSORS</h1>
+          <p class="screen-copy">Mount your phone and hold the bike fully upright. Tap zero to set the current position as 0° lean.</p>
+          <p class="sensor-readouts" data-access-summary>LEAN <output data-readout="motion">WAITING</output> · SPEED <output data-readout="location">WAITING</output></p>
+          <p class="calibration-status" data-calibration-status data-ready="false">WAITING FOR MOTION</p>
+          <button class="primary-button" type="button" data-action="zero">WAITING…</button>
+        </div>
+      </section>
+
+      <section class="screen ready-screen" data-screen="ready" aria-labelledby="ready-title" hidden>
+        <button class="screen-action" type="button" data-action="start-race">
+          <span class="visually-hidden">Start race</span>
+        </button>
+        <h1 id="ready-title" class="visually-hidden" tabindex="-1">Ready</h1>
+        <div class="ready-instruments" aria-describedby="ready-start-prompt">
+          <div class="ready-top">
+            <div class="instrument-column speed-instrument">
+              <p class="instrument-eyebrow">SPEED</p>
+              <output class="speed-value" data-speed-value aria-label="Speed unavailable">--</output>
+              <p class="instrument-unit">MPH</p>
+              <p class="gps-warning" data-gps-warning role="status">GPS · NO FIX</p>
+            </div>
+            <div class="instrument-divider" aria-hidden="true"></div>
+            <div class="instrument-column lean-instrument" data-lean-instrument>
+              <p class="instrument-eyebrow">LEAN ANGLE</p>
+              <div class="lean-gauge">
+                <svg viewBox="0 0 400 232" role="img" aria-labelledby="ready-gauge-title ready-gauge-description">
+                  <title id="ready-gauge-title">Lean angle gauge</title>
+                  <desc id="ready-gauge-description">Parked at zero degrees and level</desc>
+                  <path class="gauge-track" d="M 56.582 97.950 A 182 182 0 0 1 343.418 97.950"></path>
+                  <path class="gauge-active" d="M 200 28 A 182 182 0 0 1 200 28"></path>
+                  <g class="gauge-ticks">
+                    <line class="gauge-tick gauge-tick--major" x1="93.934" y1="103.934" x2="76.963" y2="86.963"></line>
+                    <line class="gauge-tick" x1="120" y1="71.436" x2="113" y2="59.312"></line>
+                    <line class="gauge-tick" x1="158.589" y1="55.452" x2="154.965" y2="41.929"></line>
+                    <line class="gauge-tick gauge-tick--major" x1="200" y1="60" x2="200" y2="36"></line>
+                    <line class="gauge-tick" x1="241.411" y1="55.452" x2="245.035" y2="41.929"></line>
+                    <line class="gauge-tick" x1="280" y1="71.436" x2="287" y2="59.312"></line>
+                    <line class="gauge-tick gauge-tick--major" x1="306.066" y1="103.934" x2="323.037" y2="86.963"></line>
+                  </g>
+                  <line class="gauge-needle" x1="200" y1="210" x2="200" y2="94"></line>
+                  <circle class="gauge-hub" cx="200" cy="210" r="14"></circle>
+                </svg>
+              </div>
+              <div class="lean-readout">
+                <output class="lean-value" aria-label="Lean angle 0 degrees">0°</output>
+                <span class="lean-direction">LEVEL</span>
+              </div>
+            </div>
+          </div>
+          <div class="ready-bottom">
+            <span class="timer-eyebrow">LAP TIME</span>
+            <output class="ready-time" aria-label="Lap time zero minutes">00:00.0</output>
+            <span class="timer-divider" aria-hidden="true"></span>
+            <span id="ready-start-prompt" class="ready-prompt">TAP ANYWHERE TO START RACE</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen race-screen" data-screen="race" aria-labelledby="race-title" hidden>
+        <div class="rec-indicator"><span></span>REC</div>
+        <output class="wake-lock-status" data-wake-lock-status data-state="released" role="status" aria-atomic="true">KEEP AWAKE OFF · REACQUIRING</output>
+        <button class="end-button" type="button" data-action="end-race">END RACE</button>
+        <button class="screen-action" type="button" data-action="complete-lap">
+          <span class="visually-hidden">Complete lap and start next lap</span>
+        </button>
+        <h1 id="race-title" class="visually-hidden" tabindex="-1">Race</h1>
+        <div class="race-instruments" aria-describedby="race-next-lap-prompt">
+          <div class="ready-top">
+            <div class="instrument-column speed-instrument">
+              <p class="instrument-eyebrow">SPEED</p>
+              <output class="speed-value race-speed-value" data-race-speed-value aria-label="Speed unavailable">--</output>
+              <p class="instrument-unit">MPH</p>
+              <p class="gps-warning" data-race-gps-warning role="status">GPS · NO FIX</p>
+            </div>
+            <div class="instrument-divider" aria-hidden="true"></div>
+            <div class="instrument-column lean-instrument race-lean-instrument" data-race-lean-instrument>
+              <p class="instrument-eyebrow">LEAN ANGLE</p>
+              <div class="lean-gauge">
+                <svg viewBox="0 0 400 232" role="img" aria-labelledby="race-gauge-title race-gauge-description">
+                  <title id="race-gauge-title">Lean angle gauge</title>
+                  <desc id="race-gauge-description">Current race lean angle</desc>
+                  <path class="gauge-track" d="M 56.582 97.950 A 182 182 0 0 1 343.418 97.950"></path>
+                  <path class="gauge-active" d="M 200 28 A 182 182 0 0 1 200 28"></path>
+                  <g class="gauge-ticks">
+                    <line class="gauge-tick gauge-tick--major" x1="93.934" y1="103.934" x2="76.963" y2="86.963"></line>
+                    <line class="gauge-tick" x1="120" y1="71.436" x2="113" y2="59.312"></line>
+                    <line class="gauge-tick" x1="158.589" y1="55.452" x2="154.965" y2="41.929"></line>
+                    <line class="gauge-tick gauge-tick--major" x1="200" y1="60" x2="200" y2="36"></line>
+                    <line class="gauge-tick" x1="241.411" y1="55.452" x2="245.035" y2="41.929"></line>
+                    <line class="gauge-tick" x1="280" y1="71.436" x2="287" y2="59.312"></line>
+                    <line class="gauge-tick gauge-tick--major" x1="306.066" y1="103.934" x2="323.037" y2="86.963"></line>
+                  </g>
+                  <line class="gauge-needle" x1="200" y1="210" x2="200" y2="94"></line>
+                  <circle class="gauge-hub" cx="200" cy="210" r="14"></circle>
+                </svg>
+              </div>
+              <div class="lean-readout">
+                <output class="lean-value" aria-label="Lean angle 0 degrees">0°</output>
+                <span class="lean-direction">LEVEL</span>
+              </div>
+            </div>
+          </div>
+          <p id="race-next-lap-prompt" class="race-tap-prompt">TAP ANYWHERE FOR NEXT LAP</p>
+          <div class="race-bottom">
+            <span class="timer-eyebrow">LAP TIME</span>
+            <output class="race-time" data-race-time aria-label="Current lap time zero minutes">00:00.0</output>
+            <span class="race-lap-number">LAP <output data-lap-number>1</output></span>
+            <span class="timer-divider" aria-hidden="true"></span>
+            <span class="last-lap">LAST <output data-last-lap>--:--.-</output></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen report-screen" data-screen="report" aria-labelledby="report-title" hidden>
+        <div class="report-layout">
+          <header class="report-header">
+            <div class="report-heading">
+              <h1 id="report-title" tabindex="-1">RUN REPORT</h1>
+              <p data-report-meta>RUN 1 · 0 LAPS · 00:00.0 TOTAL</p>
+            </div>
+            <p class="report-best" data-report-best>BEST --:--.-</p>
+          </header>
+
+          <div class="report-body">
+            <section class="report-column report-laps-column" aria-labelledby="lap-times-title">
+              <h2 id="lap-times-title" class="report-eyebrow">LAP TIMES</h2>
+              <div class="report-laps" data-report-laps>
+                <p class="report-empty">NO COMPLETED LAPS</p>
+              </div>
+            </section>
+
+            <section class="report-column" aria-label="Run statistics">
+              <h2 class="report-eyebrow">RUN STATS</h2>
+              <div class="report-stat-grid">
+                <article class="report-stat">
+                  <p>MAX SPEED</p>
+                  <div><output data-report-max-speed>--</output><span> MPH</span></div>
+                </article>
+                <article class="report-stat">
+                  <p>AVG SPEED</p>
+                  <div><output data-report-avg-speed>--</output><span> MPH</span></div>
+                </article>
+                <article class="report-stat report-stat--accent">
+                  <p>MAX LEAN · LEFT</p>
+                  <output data-report-left-lean>--</output>
+                </article>
+                <article class="report-stat report-stat--accent">
+                  <p>MAX LEAN · RIGHT</p>
+                  <output data-report-right-lean>--</output>
+                </article>
+              </div>
+            </section>
+
+            <section class="report-column report-track-column" aria-labelledby="track-title">
+              <h2 id="track-title" class="report-eyebrow">TRACK · TOP SPEED POINT</h2>
+              <button class="report-map" type="button" data-report-map data-location="unavailable" aria-label="No GPS fix recorded">
+                <span data-map-state>NO GPS FIX RECORDED</span>
+              </button>
+              <div class="top-speed-card">
+                <output data-top-speed>-- MPH</output>
+                <p data-top-speed-context>NO SPEED DATA</p>
+              </div>
+            </section>
+          </div>
+
+          <footer class="report-footer">
+            <p class="raw-export-status" data-raw-export-status aria-live="polite" hidden></p>
+            <button class="raw-export-retry" type="button" data-action="retry-raw-export" hidden>RETRY RAW LOG</button>
+            <p class="save-status" data-save-status aria-live="polite"></p>
+            <button class="secondary-button" type="button" data-action="new-run">NEW RUN</button>
+            <button class="save-button" type="button" data-action="save-run">SAVE RUN</button>
+          </footer>
+        </div>
+      </section>
+
+      <section class="screen gate-screen" data-screen="permission-denied" aria-labelledby="denied-title" hidden>
+        <div class="centered-content denied-content">
+          <p class="eyebrow eyebrow--alert">LIMITED SENSOR ACCESS</p>
+          <div class="denied-mark" aria-hidden="true">!</div>
+          <h1 id="denied-title" tabindex="-1">RIDE WITH LIMITED DATA</h1>
+          <div class="sensor-status sensor-status--result" aria-label="Sensor access result">
+            <p>MOTION <strong data-result="motion">UNSUPPORTED</strong></p>
+            <p>LOCATION <strong data-result="location">UNSUPPORTED</strong></p>
+          </div>
+          <div class="recovery-guidance" data-recovery-guidance aria-live="polite"></div>
+          <p class="meta-note">Available sensors keep working; unavailable readouts show N/A.</p>
+          <button class="primary-button" type="button" data-action="continue-limited">CONTINUE</button>
+        </div>
+      </section>
+    </main>
+    <noscript>Apex Lap Tracker needs JavaScript enabled.</noscript>
+  </body>
+</html>
