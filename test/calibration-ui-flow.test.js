@@ -28,7 +28,7 @@ function element() {
   };
 }
 
-function installUiHarness() {
+function installUiHarness({ motionPermission = false, pendingLocation = false } = {}) {
   const elements = new Map();
   const readouts = { motion: [element()], location: [element()] };
   const screens = ["enable", "cal", "ready", "race", "report", "permission-denied"].map((state) => {
@@ -72,9 +72,13 @@ function installUiHarness() {
   const timers = new Map();
   let nextTimer = 1;
   let now = 0;
+  let resolveMotionPermission;
+  let locationSuccess;
   const windowRef = {
     location: { search: "" },
-    DeviceMotionEvent: {},
+    DeviceMotionEvent: motionPermission
+      ? { requestPermission: () => new Promise((resolve) => { resolveMotionPermission = resolve; }) }
+      : {},
     addEventListener(type, listener) {
       windowListeners.set(type, listener);
     },
@@ -95,7 +99,8 @@ function installUiHarness() {
   const navigatorRef = {
     geolocation: {
       watchPosition(success) {
-        success({
+        locationSuccess = success;
+        if (!pendingLocation) locationSuccess({
           timestamp: 0,
           coords: { latitude: 37, longitude: -122, accuracy: 3, speed: 0, heading: 0 },
         });
@@ -125,6 +130,18 @@ function installUiHarness() {
     setNow(value) { now = value; },
     now: () => now,
     emitMotion(event) { windowListeners.get("devicemotion")(event); },
+    resolveMotionPermission(permission) { resolveMotionPermission(permission); },
+    succeedLocation() {
+      locationSuccess({
+        timestamp: 0,
+        coords: { latitude: 37, longitude: -122, accuracy: 3, speed: 0, heading: 0 },
+      });
+    },
+    runTimeouts() {
+      const callbacks = [...timers.values()];
+      timers.clear();
+      callbacks.forEach((callback) => callback());
+    },
   };
 }
 
@@ -137,7 +154,7 @@ function replaceGlobal(name, value) {
   };
 }
 
-test("the Calibrate UI starts a tap capture and reaches Ready after stable motion", async (t) => {
+test("the Calibrate UI retries a deadline-cancelled capture and reaches Ready", async (t) => {
   const harness = installUiHarness();
   const restore = [
     replaceGlobal("window", harness.windowRef),
@@ -156,10 +173,20 @@ test("the Calibrate UI starts a tap capture and reaches Ready after stable motio
   assert.equal(zero.disabled, true);
   assert.equal(zero.textContent, "CAPTURING ZERO");
 
+  harness.setNow(1_001);
+  harness.runTimeouts();
+  assert.equal(zero.disabled, false);
+  assert.equal(zero.textContent, "ZERO NOW");
+  assert.equal(
+    harness.elements.get("[data-calibration-status]").textContent,
+    "ZERO NOT CAPTURED · INSUFFICIENT USABLE MOTION · TRY AGAIN",
+  );
+
+  await zero.click();
   for (let index = 0; index <= 10; index += 1) {
-    harness.setNow(index * 100);
+    harness.setNow(1_001 + index * 100);
     harness.emitMotion({
-      timeStamp: index * 100,
+      timeStamp: 1_001 + index * 100,
       accelerationIncludingGravity: { x: 0, y: 0, z: 9.80665 },
       rotationRate: { alpha: 0, beta: 0, gamma: 0 },
       interval: 100,
@@ -167,4 +194,28 @@ test("the Calibrate UI starts a tap capture and reaches Ready after stable motio
   }
 
   assert.equal(harness.screens.get("ready").hidden, false);
+});
+
+test("a motion grant reaches Calibrate and ZERO while location is pending", async (t) => {
+  const harness = installUiHarness({ motionPermission: true, pendingLocation: true });
+  const restore = [
+    replaceGlobal("window", harness.windowRef),
+    replaceGlobal("navigator", harness.navigatorRef),
+    replaceGlobal("document", harness.documentRef),
+    replaceGlobal("performance", { now: harness.now }),
+  ];
+  t.after(() => restore.reverse().forEach((restoreGlobal) => restoreGlobal()));
+
+  await import(`../js/main.js?motion-before-location=${Date.now()}`);
+  const enabling = harness.elements.get('[data-action="enable"]').click();
+  harness.resolveMotionPermission("granted");
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(harness.screens.get("cal").hidden, false);
+  await harness.elements.get('[data-action="zero"]').click();
+  assert.equal(harness.elements.get('[data-action="zero"]').textContent, "CAPTURING ZERO");
+
+  harness.succeedLocation();
+  await enabling;
 });

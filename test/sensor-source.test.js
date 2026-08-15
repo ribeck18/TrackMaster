@@ -262,6 +262,7 @@ test("browser-shaped alpha/beta/gamma are independently normalized to x/y/z at t
   const samples = [];
   app.source.subscribe((sample) => samples.push(sample));
   await app.source.requestAccess();
+  samples.length = 0;
 
   app.listeners.get("devicemotion")({
     timeStamp: 123,
@@ -383,13 +384,14 @@ test("the unified subscription unsubscribe and destroy clean up platform streams
   const access = app.source.requestAccess();
   app.succeedLocation();
   await access;
+  samples.length = 0;
 
   unsubscribe();
   app.listeners.get("devicemotion")({
     accelerationIncludingGravity: { x: 0, y: 0, z: 9.8 },
     rotationRate: { alpha: 0, beta: 0, gamma: 0 },
   });
-  assert.equal(samples.length, 1, "only the location sample arrived before unsubscribe");
+  assert.equal(samples.length, 0, "no samples arrive after unsubscribe");
 
   app.source.destroy();
   assert.ok(app.calls.includes("remove-devicemotion"));

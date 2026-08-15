@@ -89,6 +89,10 @@ const zeroButton = document.querySelector('[data-action="zero"]');
 const calibrationStatus = document.querySelector("[data-calibration-status]");
 const leanEstimator = assertLeanEstimator(createLeanEstimator({ nowRef: monotonicNow }));
 const CALIBRATION_CAPTURE_MS = 1_000;
+const pendingLocationOutcome = Object.freeze({
+  status: SENSOR_STATUS.REQUESTING,
+  reason: "Location permission is pending.",
+});
 const calibrationCapture = createBikeFrameCalibrationCapture({
   nowRef: monotonicNow,
   captureMs: CALIBRATION_CAPTURE_MS,
@@ -222,7 +226,8 @@ function updateCalibrationUi() {
     calibrationStatus.dataset.ready = String(!replayCalibrationInitializing);
     return;
   }
-  const outcome = accessOutcomeState.getCurrent()?.motion;
+  const outcome =
+    accessOutcomeState.getCurrent()?.motion ?? accessOutcomeState.getPending().motion;
   if (outcome?.status !== SENSOR_STATUS.GRANTED) return;
   const now = monotonicNow();
   const gyroTimedOut =
@@ -325,7 +330,21 @@ function handleSensorSample(sample) {
 
   if (sample.type !== "access") return;
   const recoveredOutcomes = accessOutcomeState.record(sample.sensor, sample.outcome);
-  if (!recoveredOutcomes) return;
+  if (!recoveredOutcomes) {
+    if (
+      sample.sensor === "motion" &&
+      sample.outcome.status === SENSOR_STATUS.GRANTED &&
+      currentState === "enable"
+    ) {
+      const pendingOutcomes = accessOutcomeState.getPending();
+      applyAccessOutcomes({
+        motion: pendingOutcomes.motion,
+        location: pendingOutcomes.location ?? pendingLocationOutcome,
+      });
+      dispatch("ENABLE");
+    }
+    return;
+  }
   applyAccessOutcomes(recoveredOutcomes);
 
   const allGranted = Object.values(recoveredOutcomes).every(
@@ -370,7 +389,9 @@ function applyAccessOutcomes(outcomes) {
 
     for (const readout of document.querySelectorAll(`[data-readout="${sensor}"]`)) {
       readout.dataset.status = status;
-      readout.textContent = status === SENSOR_STATUS.GRANTED ? "GRANTED" : "N/A";
+      readout.textContent = status === SENSOR_STATUS.GRANTED
+        ? "GRANTED"
+        : status === SENSOR_STATUS.REQUESTING ? "WAITING" : "N/A";
     }
   }
 
@@ -436,7 +457,7 @@ enableButton.addEventListener("click", async () => {
     const allGranted = Object.values(mergedOutcomes).every(
       ({ status }) => status === SENSOR_STATUS.GRANTED,
     );
-    dispatch(allGranted ? "ENABLE" : "PERMISSION_DENIED");
+    if (currentState === "enable") dispatch(allGranted ? "ENABLE" : "PERMISSION_DENIED");
   } catch {
     const unavailable = Object.freeze({ status: SENSOR_STATUS.UNSUPPORTED, reason: "Access failed." });
     const mergedOutcomes = accessOutcomeState.initialize({
@@ -452,7 +473,8 @@ enableButton.addEventListener("click", async () => {
 
 zeroButton.addEventListener("click", async () => {
   const motionAvailable =
-    accessOutcomeState.getCurrent()?.motion.status === SENSOR_STATUS.GRANTED;
+    (accessOutcomeState.getCurrent()?.motion ?? accessOutcomeState.getPending().motion)?.status ===
+    SENSOR_STATUS.GRANTED;
   if (replayInitialization) {
     replayCalibrationInitializing = true;
     updateCalibrationUi();

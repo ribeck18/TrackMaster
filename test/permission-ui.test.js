@@ -16,7 +16,8 @@ for (const sensor of ["motion", "location"]) {
 
 test("granted, denied, unavailable, and unsupported outcomes receive distinct visible labels", () => {
   assert.match(main, /resultOutput\.textContent = status\.toUpperCase\(\)/);
-  assert.match(main, /status === SENSOR_STATUS\.GRANTED \? "GRANTED" : "N\/A"/);
+  assert.match(main, /status === SENSOR_STATUS\.GRANTED/);
+  assert.match(main, /status === SENSOR_STATUS\.REQUESTING \? "WAITING" : "N\/A"/);
   assert.match(main, /SENSOR_STATUS\.DENIED/);
   assert.match(main, /SENSOR_STATUS\.UNAVAILABLE/);
   assert.match(main, /SENSOR_STATUS\.UNSUPPORTED/);

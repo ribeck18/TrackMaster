@@ -3,6 +3,7 @@ export const SENSOR_STATUS = Object.freeze({
   DENIED: "denied",
   UNAVAILABLE: "unavailable",
   UNSUPPORTED: "unsupported",
+  REQUESTING: "requesting",
 });
 
 const DEFAULT_LOCATION_TIMEOUT_MS = 10_000;
@@ -73,19 +74,22 @@ export function createBrowserSensorSource({
   }
 
   function requestMotionAccess() {
+    function settled(outcome) {
+      emit({ type: "access", sensor: "motion", outcome });
+      return Promise.resolve(outcome);
+    }
+
     const OrientationEvent = windowRef?.DeviceOrientationEvent;
     const MotionEvent = windowRef?.DeviceMotionEvent;
     if (!MotionEvent || typeof windowRef?.addEventListener !== "function") {
-      return Promise.resolve(
-        result(SENSOR_STATUS.UNSUPPORTED, "A usable DeviceMotion gyroscope is not available."),
-      );
+      return settled(result(SENSOR_STATUS.UNSUPPORTED, "A usable DeviceMotion gyroscope is not available."));
     }
 
     const PermissionEvent =
       typeof MotionEvent?.requestPermission === "function" ? MotionEvent : OrientationEvent;
     if (typeof PermissionEvent?.requestPermission !== "function") {
       startMotionEvents();
-      return Promise.resolve(result(SENSOR_STATUS.GRANTED, "Direct event subscription is available."));
+      return settled(result(SENSOR_STATUS.GRANTED, "Direct event subscription is available."));
     }
 
     let permissionRequest;
@@ -94,20 +98,20 @@ export function createBrowserSensorSource({
       // iOS Safari's requirement that it occur inside the button gesture.
       permissionRequest = PermissionEvent.requestPermission();
     } catch (error) {
-      return Promise.resolve(result(SENSOR_STATUS.UNSUPPORTED, error?.message ?? "Motion access failed."));
+      return settled(result(SENSOR_STATUS.UNSUPPORTED, error?.message ?? "Motion access failed."));
     }
 
     return new Promise((resolve) => {
       let settled = false;
       const fallbackTimer = setTimeoutRef(() => {
-        settled = true;
-        resolve(result(SENSOR_STATUS.UNSUPPORTED, "Motion permission did not respond in time."));
+        finish(result(SENSOR_STATUS.UNSUPPORTED, "Motion permission did not respond in time."));
       }, permissionTimeoutMs);
 
       function finish(outcome) {
         if (settled) return;
         settled = true;
         clearTimeoutRef(fallbackTimer);
+        emit({ type: "access", sensor: "motion", outcome });
         resolve(outcome);
       }
 
@@ -130,7 +134,9 @@ export function createBrowserSensorSource({
   function requestLocationAccess() {
     const geolocation = navigatorRef?.geolocation;
     if (!geolocation || typeof geolocation.watchPosition !== "function") {
-      return Promise.resolve(result(SENSOR_STATUS.UNSUPPORTED, "Geolocation is not available."));
+      const outcome = result(SENSOR_STATUS.UNSUPPORTED, "Geolocation is not available.");
+      emit({ type: "access", sensor: "location", outcome });
+      return Promise.resolve(outcome);
     }
 
     return new Promise((resolve) => {
@@ -144,6 +150,7 @@ export function createBrowserSensorSource({
         settled = true;
         currentStatus = outcome.status;
         if (fallbackTimer !== null) clearTimeoutRef(fallbackTimer);
+        emit({ type: "access", sensor: "location", outcome });
         resolve(outcome);
       }
 
