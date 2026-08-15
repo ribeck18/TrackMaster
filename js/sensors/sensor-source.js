@@ -24,7 +24,6 @@ export function createBrowserSensorSource({
   permissionTimeoutMs = DEFAULT_LOCATION_TIMEOUT_MS,
 } = {}) {
   const subscribers = new Set();
-  let orientationListening = false;
   let motionListening = false;
   let locationWatchId = null;
   let accessPromise = null;
@@ -33,18 +32,6 @@ export function createBrowserSensorSource({
   function emit(sample) {
     if (destroyed) return;
     for (const subscriber of subscribers) subscriber(sample);
-  }
-
-  function onOrientation(event) {
-    if (!Number.isFinite(event.beta) || !Number.isFinite(event.gamma)) return;
-
-    emit({
-      type: "orientation",
-      timestamp: Number.isFinite(event.timeStamp) ? event.timeStamp : Date.now(),
-      beta: event.beta,
-      gamma: event.gamma,
-      alpha: Number.isFinite(event.alpha) ? event.alpha : null,
-    });
   }
 
   function onMotion(event) {
@@ -77,13 +64,9 @@ export function createBrowserSensorSource({
     });
   }
 
-  function startMotionEvents({ orientationAvailable, deviceMotionAvailable }) {
+  function startMotionEvents() {
     if (destroyed) return;
-    if (orientationAvailable && !orientationListening) {
-      windowRef.addEventListener("deviceorientation", onOrientation, true);
-      orientationListening = true;
-    }
-    if (deviceMotionAvailable && !motionListening) {
+    if (!motionListening) {
       windowRef.addEventListener("devicemotion", onMotion, true);
       motionListening = true;
     }
@@ -101,10 +84,7 @@ export function createBrowserSensorSource({
     const PermissionEvent =
       typeof MotionEvent?.requestPermission === "function" ? MotionEvent : OrientationEvent;
     if (typeof PermissionEvent?.requestPermission !== "function") {
-      startMotionEvents({
-        orientationAvailable: Boolean(OrientationEvent),
-        deviceMotionAvailable: Boolean(MotionEvent),
-      });
+      startMotionEvents();
       return Promise.resolve(result(SENSOR_STATUS.GRANTED, "Direct event subscription is available."));
     }
 
@@ -135,10 +115,7 @@ export function createBrowserSensorSource({
         .then((permission) => {
           if (settled) return;
           if (permission === "granted") {
-            startMotionEvents({
-              orientationAvailable: Boolean(OrientationEvent),
-              deviceMotionAvailable: Boolean(MotionEvent),
-            });
+            startMotionEvents();
             finish(result(SENSOR_STATUS.GRANTED));
             return;
           }
@@ -285,10 +262,6 @@ export function createBrowserSensorSource({
   function destroy() {
     destroyed = true;
     subscribers.clear();
-    if (orientationListening) {
-      windowRef.removeEventListener("deviceorientation", onOrientation, true);
-      orientationListening = false;
-    }
     if (motionListening) {
       windowRef.removeEventListener("devicemotion", onMotion, true);
       motionListening = false;

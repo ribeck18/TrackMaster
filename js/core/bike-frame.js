@@ -227,6 +227,3 @@ export function createBikeFrameCalibrationCapture({
 
   return Object.freeze({ start, add, snapshot });
 }
-
-// Retained until the UI switches from pre-tap readiness to capture.start().
-export const createBikeFrameCalibrationWindow = createBikeFrameCalibrationCapture;

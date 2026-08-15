@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "apex-lap-tracker-";
-const BUILD_STAMP = "20260804-issue19-raw-export-retry";
+const BUILD_STAMP = "20260815-issue22-zero-capture";
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_STAMP}`;
 
 // Keep this list explicit: a successful install means the complete application
@@ -40,7 +40,6 @@ const PRECACHE_URLS = Object.freeze([
   "./js/register-service-worker.js",
   "./js/router.js",
   "./js/sensors/sensor-source.js",
-  "./js/sensors/spirit-level.js",
   "./js/sensors/timed-sensor-source.js",
   "./js/sensors/wake-lock.js",
   "./js/ui/lean-gauge.js",
