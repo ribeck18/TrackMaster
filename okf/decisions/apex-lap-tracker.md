@@ -45,12 +45,11 @@ acceleration during the first provably straight, fast section. No extra rider
 step.
 
 **Permissions get their own gate screen.** A new `ENABLE SENSORS` state precedes
-calibrate, because iOS requires `requestPermission()` inside a user gesture and
-the calibrate screen's live spirit level needs tilt data *before* its own button
-is tapped. Denial never dead-ends the app: no motion → speed-and-laps stopwatch
-with the lean gauge showing `N/A`; no GPS → lean and laps still work. Both show
-Settings-based recovery instructions, since a denied `requestPermission()` can't
-re-prompt from the page.
+calibrate, because iOS requires the enable gesture before tap-initiated zero
+capture can request motion access. Denial never dead-ends the app: no motion →
+speed-and-laps stopwatch with the lean gauge showing `N/A`; no GPS → lean and
+laps still work. Both show Settings-based recovery instructions, since a denied
+`requestPermission()` can't re-prompt from the page.
 
 **Speed shows `--` with a GPS warning when there is no fix**, and `0` only with
 a fix and a stationary bike, so a dead sensor is distinguishable from a stopped

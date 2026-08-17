@@ -1,5 +1,5 @@
 import { createAccessOutcomeState } from "./access-outcome-state.js";
-import { createBikeFrameCalibrationWindow } from "./core/bike-frame.js";
+import { createBikeFrameCalibrationCapture } from "./core/bike-frame.js";
 import {
   createGpsSpeedometer,
   isAcceptedLocationSample,
@@ -41,7 +41,6 @@ import { shouldMoveFocus, STATES, transition } from "./router.js";
 import { shouldDestroySensorsOnPageHide } from "./page-lifecycle.js";
 import { registerServiceWorker } from "./register-service-worker.js";
 import { createBrowserSensorSource, SENSOR_STATUS } from "./sensors/sensor-source.js";
-import { calculateBubbleOffset } from "./sensors/spirit-level.js";
 import { createRaceWakeLock, WAKE_LOCK_STATE } from "./sensors/wake-lock.js";
 import { createLeanGaugeRenderer } from "./ui/lean-gauge.js";
 import { renderRunReport } from "./ui/run-report.js";
@@ -69,9 +68,6 @@ const rawLogExportState = rawRecorder
   : null;
 const sensorSource = rawRecorder ?? selectedSensorSource;
 const replayInitialization = sensorSource.getReplayInitialization?.() ?? null;
-const spiritLevel = document.querySelector("[data-spirit-level]");
-const bubble = spiritLevel.querySelector(".level__bubble");
-const unavailableLevel = spiritLevel.querySelector(".level__unavailable");
 const enableButton = document.querySelector('[data-action="enable"]');
 const accessOutcomeState = createAccessOutcomeState();
 const monotonicNow = globalThis.performance?.now?.bind(globalThis.performance) ?? Date.now;
@@ -92,7 +88,15 @@ const retryRawExportButton = document.querySelector('[data-action="retry-raw-exp
 const zeroButton = document.querySelector('[data-action="zero"]');
 const calibrationStatus = document.querySelector("[data-calibration-status]");
 const leanEstimator = assertLeanEstimator(createLeanEstimator({ nowRef: monotonicNow }));
-const calibrationWindow = createBikeFrameCalibrationWindow({ nowRef: monotonicNow });
+const CALIBRATION_CAPTURE_MS = 1_000;
+const pendingLocationOutcome = Object.freeze({
+  status: SENSOR_STATUS.REQUESTING,
+  reason: "Location permission is pending.",
+});
+const calibrationCapture = createBikeFrameCalibrationCapture({
+  nowRef: monotonicNow,
+  captureMs: CALIBRATION_CAPTURE_MS,
+});
 const readyLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-lean-instrument]"));
 const raceLeanGauge = createLeanGaugeRenderer(document.querySelector("[data-race-lean-instrument]"));
 const sessionRecorder = createSessionRecorder({ nowRef: monotonicNow });
@@ -152,6 +156,9 @@ let lastLapActivationAt = Number.NEGATIVE_INFINITY;
 let runCount = 0;
 let replayCalibrationInitializing = false;
 let replayRaceStarting = false;
+let calibrationCaptureActive = false;
+let calibrationCaptureOutcome = null;
+let calibrationCaptureDeadline = null;
 
 const MINIMUM_LAP_ACTIVATION_INTERVAL_MS = 500;
 
@@ -195,19 +202,10 @@ function dispatch(event) {
   render(nextState, { moveFocus: shouldMoveFocus(currentState, nextState) });
 }
 
-function displayRotation() {
-  if (window.matchMedia?.("(orientation: portrait)").matches) return 90;
-  const angle = Number(window.screen?.orientation?.angle ?? window.orientation ?? 0);
-  return Number.isFinite(angle) ? angle : 0;
-}
-
-function updateSpiritLevel(sample) {
-  if (sample.type !== "orientation") return;
-  const offset = calculateBubbleOffset(sample, { rotationDegrees: displayRotation() });
-  if (!offset) return;
-
-  bubble.style.setProperty("--bubble-x", `${offset.x.toFixed(2)}px`);
-  bubble.style.setProperty("--bubble-y", `${offset.y.toFixed(2)}px`);
+function clearCalibrationCaptureDeadline() {
+  if (calibrationCaptureDeadline === null) return;
+  window.clearTimeout(calibrationCaptureDeadline);
+  calibrationCaptureDeadline = null;
 }
 
 function updateCalibrationUi() {
@@ -228,21 +226,47 @@ function updateCalibrationUi() {
     calibrationStatus.dataset.ready = String(!replayCalibrationInitializing);
     return;
   }
-  const outcome = accessOutcomeState.getCurrent()?.motion;
+  const outcome =
+    accessOutcomeState.getCurrent()?.motion ?? accessOutcomeState.getPending().motion;
   if (outcome?.status !== SENSOR_STATUS.GRANTED) return;
   const now = monotonicNow();
-  const readiness = calibrationWindow.snapshot(now);
-  const gyroFresh = isGyroDeliveryFresh(lastGyroReceivedAt, now);
   const gyroTimedOut =
-    Number.isFinite(motionGrantedAt) && now - motionGrantedAt > 1_000 && !gyroFresh;
-  zeroButton.disabled = !readiness.ready && !gyroTimedOut;
-  zeroButton.textContent = readiness.ready
-    ? "ZERO NOW"
-    : gyroTimedOut
-      ? "CONTINUE WITHOUT LEAN"
-      : "WAITING…";
-  calibrationStatus.textContent = gyroTimedOut ? "GYROSCOPE NOT DELIVERING" : readiness.reason;
-  calibrationStatus.dataset.ready = String(readiness.ready);
+    Number.isFinite(motionGrantedAt) &&
+    now - motionGrantedAt > 1_000 &&
+    !isGyroDeliveryFresh(lastGyroReceivedAt, now);
+  zeroButton.disabled = calibrationCaptureActive;
+  zeroButton.textContent = calibrationCaptureActive ? "CAPTURING ZERO" : "ZERO NOW";
+  calibrationStatus.textContent = calibrationCaptureActive
+    ? "CAPTURING ZERO"
+    : calibrationCaptureOutcome?.status === "cancelled"
+      ? `ZERO NOT CAPTURED · ${calibrationCaptureOutcome.reason} · TRY AGAIN`
+      : gyroTimedOut
+        ? "GYROSCOPE NOT DELIVERING · TAP ZERO TO CONTINUE WITHOUT LEAN"
+        : "HOLD BIKE UPRIGHT · TAP ZERO";
+  calibrationStatus.dataset.ready = "false";
+}
+
+function finishCalibrationCapture(outcome) {
+  if (!calibrationCaptureActive || outcome.status === "capturing") return;
+  calibrationCaptureActive = false;
+  clearCalibrationCaptureDeadline();
+
+  if (outcome.status !== "captured") {
+    calibrationCaptureOutcome = outcome;
+    updateCalibrationUi();
+    return;
+  }
+
+  try {
+    leanEstimator.calibrate(outcome.gravity);
+    rawRecorder?.setReplayCalibration(outcome.gravity);
+    readyLeanGauge.render(0);
+    dispatch("ZERO");
+  } catch (error) {
+    console.error("Bike-frame calibration failed.", error);
+    calibrationCaptureOutcome = Object.freeze({ status: "cancelled", reason: "ADJUST PHONE MOUNT" });
+    updateCalibrationUi();
+  }
 }
 
 function currentLean(now = monotonicNow()) {
@@ -271,7 +295,6 @@ function captureSessionSample(sample, { acceptedLocation = false } = {}) {
 }
 
 function handleSensorSample(sample) {
-  updateSpiritLevel(sample);
   let acceptedLocation = false;
 
   if (sample.type === "location") {
@@ -294,16 +317,34 @@ function handleSensorSample(sample) {
     ) {
       lastGyroReceivedAt = monotonicNow();
     }
-    calibrationWindow.add(sample, monotonicNow());
-    if (currentState === "cal") updateCalibrationUi();
+    const captureOutcome = calibrationCapture.add(sample, monotonicNow());
+    // The terminal capture sample is recorded and estimated before its zero is
+    // applied, matching replay's recorded pre-action delivery.
     leanEstimator.update(sample);
+    if (calibrationCaptureActive && captureOutcome.status !== "capturing") {
+      finishCalibrationCapture(captureOutcome);
+    }
   }
 
   captureSessionSample(sample, { acceptedLocation });
 
   if (sample.type !== "access") return;
   const recoveredOutcomes = accessOutcomeState.record(sample.sensor, sample.outcome);
-  if (!recoveredOutcomes) return;
+  if (!recoveredOutcomes) {
+    if (
+      sample.sensor === "motion" &&
+      sample.outcome.status === SENSOR_STATUS.GRANTED &&
+      currentState === "enable"
+    ) {
+      const pendingOutcomes = accessOutcomeState.getPending();
+      applyAccessOutcomes({
+        motion: pendingOutcomes.motion,
+        location: pendingOutcomes.location ?? pendingLocationOutcome,
+      });
+      dispatch("ENABLE");
+    }
+    return;
+  }
   applyAccessOutcomes(recoveredOutcomes);
 
   const allGranted = Object.values(recoveredOutcomes).every(
@@ -348,7 +389,9 @@ function applyAccessOutcomes(outcomes) {
 
     for (const readout of document.querySelectorAll(`[data-readout="${sensor}"]`)) {
       readout.dataset.status = status;
-      readout.textContent = status === SENSOR_STATUS.GRANTED ? "GRANTED" : "N/A";
+      readout.textContent = status === SENSOR_STATUS.GRANTED
+        ? "GRANTED"
+        : status === SENSOR_STATUS.REQUESTING ? "WAITING" : "N/A";
     }
   }
 
@@ -382,19 +425,14 @@ function applyAccessOutcomes(outcomes) {
   if (motionAvailable && motionGrantedAt === null) motionGrantedAt = monotonicNow();
   if (!motionAvailable) {
     motionGrantedAt = null;
-    calibrationWindow.reset();
+    calibrationCaptureActive = false;
+    clearCalibrationCaptureDeadline();
     zeroButton.disabled = false;
     readyLeanGauge.render(Number.NaN);
     raceLeanGauge.render(Number.NaN);
   } else {
     updateCalibrationUi();
   }
-  spiritLevel.classList.toggle("level--unavailable", !motionAvailable);
-  spiritLevel.setAttribute(
-    "aria-label",
-    motionAvailable ? "Live spirit level" : "Spirit level unavailable because motion access is unavailable",
-  );
-  unavailableLevel.hidden = motionAvailable;
 
   if (!motionAvailable) {
     zeroButton.textContent = "CONTINUE";
@@ -419,7 +457,7 @@ enableButton.addEventListener("click", async () => {
     const allGranted = Object.values(mergedOutcomes).every(
       ({ status }) => status === SENSOR_STATUS.GRANTED,
     );
-    dispatch(allGranted ? "ENABLE" : "PERMISSION_DENIED");
+    if (currentState === "enable") dispatch(allGranted ? "ENABLE" : "PERMISSION_DENIED");
   } catch {
     const unavailable = Object.freeze({ status: SENSOR_STATUS.UNSUPPORTED, reason: "Access failed." });
     const mergedOutcomes = accessOutcomeState.initialize({
@@ -435,7 +473,8 @@ enableButton.addEventListener("click", async () => {
 
 zeroButton.addEventListener("click", async () => {
   const motionAvailable =
-    accessOutcomeState.getCurrent()?.motion.status === SENSOR_STATUS.GRANTED;
+    (accessOutcomeState.getCurrent()?.motion ?? accessOutcomeState.getPending().motion)?.status ===
+    SENSOR_STATUS.GRANTED;
   if (replayInitialization) {
     replayCalibrationInitializing = true;
     updateCalibrationUi();
@@ -463,31 +502,25 @@ zeroButton.addEventListener("click", async () => {
   }
   if (motionAvailable) {
     const now = monotonicNow();
-    const readiness = calibrationWindow.snapshot(now);
-    if (!readiness.ready) {
-      const gyroTimedOut =
-        Number.isFinite(motionGrantedAt) &&
-        now - motionGrantedAt > 1_000 &&
-        !isGyroDeliveryFresh(lastGyroReceivedAt, now);
-      if (gyroTimedOut) {
-        rawRecorder?.setReplayWithoutLean();
-        readyLeanGauge.render(Number.NaN);
-        dispatch("ZERO");
-        return;
-      }
-      updateCalibrationUi();
+    const gyroTimedOut =
+      Number.isFinite(motionGrantedAt) &&
+      now - motionGrantedAt > 1_000 &&
+      !isGyroDeliveryFresh(lastGyroReceivedAt, now);
+    if (gyroTimedOut) {
+      rawRecorder?.setReplayWithoutLean();
+      readyLeanGauge.render(Number.NaN);
+      dispatch("ZERO");
       return;
     }
-    try {
-      leanEstimator.calibrate(readiness.gravity);
-      rawRecorder?.setReplayCalibration(readiness.gravity);
-      readyLeanGauge.render(0);
-    } catch (error) {
-      console.error("Bike-frame calibration failed.", error);
-      calibrationWindow.reset();
-      updateCalibrationUi();
-      return;
-    }
+
+    calibrationCaptureActive = true;
+    calibrationCaptureOutcome = null;
+    calibrationCapture.start(now);
+    updateCalibrationUi();
+    calibrationCaptureDeadline = window.setTimeout(() => {
+      finishCalibrationCapture(calibrationCapture.snapshot(monotonicNow()));
+    }, CALIBRATION_CAPTURE_MS + 1);
+    return;
   } else {
     rawRecorder?.setReplayWithoutLean();
     readyLeanGauge.render(Number.NaN);

@@ -224,24 +224,18 @@ product unto itself.
 map to toggle to lean-angle coloring** — nearly free to build, and it turns the
 map from decoration into the most informative thing in the report.
 
-### Q10 — Permissions, and a chicken-and-egg in the calibrate screen
+### Q10 — Permissions and calibration
 
-iOS requires `DeviceOrientationEvent.requestPermission()` to be called inside a
-user gesture. The only gesture on the calibrate screen is `ZERO NOW` — but that
-screen's bubble is specified to "move live with the phone's tilt (a real
-spirit-level)." It cannot. Until permission is granted there is no tilt data, so
-the bubble is frozen, and the tap that would grant permission is the same tap
-that captures the zero. The rider would be zeroing against a spirit level they
-never got to use.
-
-Denial is also close to unrecoverable from inside the page: once a rider taps
-Don't Allow, further `requestPermission()` calls resolve `denied` instantly with
-no prompt. Recovery means Settings → Safari → Motion & Orientation Access, or
-clearing site data — not something to discover in a pit lane.
+iOS requires motion permission to be requested inside a user gesture. Denial is
+also close to unrecoverable from inside the page: once a rider taps Don't Allow,
+further `requestPermission()` calls resolve `denied` instantly with no prompt.
+Recovery means Settings → Safari → Motion & Orientation Access, or clearing site
+data — not something to discover in a pit lane.
 
 **Decision: add an `ENABLE SENSORS` gate screen** before calibrate, styled to
-match. One tap requests motion + GPS together; calibrate then opens with a
-genuinely live spirit level, and `ZERO NOW` means only "zero". It is also the
+match. One tap requests motion + GPS together. The Calibrate screen instructs
+the rider to hold the bike upright; tapping `ZERO NOW` starts a roughly
+one-second stable gravity-and-gyro capture before advancing. It is also the
 natural home for denied-state recovery instructions.
 
 **Degradation rules:** denial never dead-ends the app. No motion permission → a
@@ -305,7 +299,7 @@ Each is deliberate; each is individually vetoable.
 | Zero = scalar offset | Zero = full bike-frame capture + silent forward-axis refinement | One gravity vector can't separate roll from pitch |
 | Lock to landscape | CSS-rotate the app root when portrait | iOS has no orientation lock; a rotate-prompt hard-sticks Rotation Lock users |
 | Persist runs to IndexedDB | Stateless; `SAVE RUN` exports JSON + GPX | Owner's call — DB comes later |
-| Calibrate is the first screen | `ENABLE SENSORS` gate precedes it | `requestPermission()` needs a gesture *before* the live spirit level can move |
+| Calibrate is the first screen | `ENABLE SENSORS` gate precedes it | Permission needs a gesture before the tap-initiated upright capture |
 | `BACK STRAIGHT · LAP 2` | `LAP 2 · 0:47 INTO LAP` | Named track sections need a circuit database |
 | Striped map placeholder | Real GPS polyline, speed/lean color toggle | The data is already recorded |
 | — | Lap trim (±0.5 s, boundary model) in report | Owner's addition |

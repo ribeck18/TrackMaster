@@ -88,19 +88,14 @@ export function projectDeviceVector(vector, frame) {
 }
 
 const DEFAULT_CALIBRATION_OPTIONS = Object.freeze({
-  windowMs: 600,
+  captureMs: 1_000,
   minimumSpanMs: 400,
   minimumSamples: 5,
-  maximumAgeMs: 300,
-  // The gravity band and rate ceiling gate "held upright and still". They are
-  // deliberately loose enough to tolerate idle engine vibration and normal hand
-  // tremor while a rider steadies a bar-mounted phone; a genuine reposition
-  // still exceeds them. Tight limits here were the main reason ZERO took several
-  // attempts on a running bike.
   minimumGravity: 8.5,
   maximumGravity: 11,
   maximumRateDps: 10,
   maximumDirectionSpreadDegrees: 5,
+  maximumConsecutiveDisturbances: 2,
 });
 
 function motionGravity(sample) {
@@ -115,67 +110,49 @@ function motionRate(sample) {
   return { x: rate.x, y: rate.y, z: rate.z };
 }
 
-/** Collects a recent, stable gravity+gyro window for ZERO. */
-export function createBikeFrameCalibrationWindow({
+/** Captures one short, tap-initiated gravity+gyro sample set for ZERO. */
+export function createBikeFrameCalibrationCapture({
   nowRef = globalThis.performance?.now?.bind(globalThis.performance) ?? Date.now,
   ...overrides
 } = {}) {
   const config = Object.freeze({ ...DEFAULT_CALIBRATION_OPTIONS, ...overrides });
   const positiveKeys = [
-    "windowMs",
+    "captureMs",
     "minimumSpanMs",
     "minimumSamples",
-    "maximumAgeMs",
     "minimumGravity",
     "maximumGravity",
     "maximumRateDps",
     "maximumDirectionSpreadDegrees",
+    "maximumConsecutiveDisturbances",
   ];
   if (positiveKeys.some((key) => !Number.isFinite(config[key]) || config[key] <= 0)) {
-    throw new RangeError("Calibration window limits must be positive finite numbers.");
+    throw new RangeError("Calibration capture limits must be positive finite numbers.");
   }
-  if (config.maximumGravity <= config.minimumGravity || config.minimumSpanMs > config.windowMs) {
-    throw new RangeError("Calibration window ranges are invalid.");
+  if (config.maximumGravity <= config.minimumGravity || config.minimumSpanMs > config.captureMs) {
+    throw new RangeError("Calibration capture ranges are invalid.");
   }
 
+  let startedAt = null;
   let readings = [];
+  let pendingReading = null;
+  let baseline = null;
+  let consecutiveDisturbances = 0;
+  let terminal = null;
 
-  function add(sample, receivedAt = nowRef()) {
-    const gravity = motionGravity(sample);
-    const rate = motionRate(sample);
-    const gravityMagnitude = gravity ? magnitude(gravity) : 0;
-    const valid =
-      Number.isFinite(receivedAt) &&
-      gravity &&
-      rate &&
-      gravityMagnitude >= config.minimumGravity &&
-      gravityMagnitude <= config.maximumGravity &&
-      magnitude(rate) <= config.maximumRateDps;
-
-    // Drop a single out-of-band sample (a vibration spike or brief bump) instead
-    // of discarding the whole window, so one bad reading no longer restarts the
-    // 5-sample accumulation. Sustained disturbance still blocks ZERO: the latest
-    // accepted reading ages out past maximumAgeMs, and the next accepted sample's
-    // window filter purges anything older than windowMs.
-    if (!valid) return snapshot(receivedAt);
-
-    readings.push({ receivedAt, gravity, direction: normalize(gravity) });
-    readings = readings.filter((reading) => receivedAt - reading.receivedAt <= config.windowMs);
-    return snapshot(receivedAt);
+  function result(status, reason, gravity = null) {
+    return Object.freeze({ status, reason, gravity: gravity && Object.freeze(gravity) });
   }
 
-  function snapshot(now = nowRef()) {
-    if (!Number.isFinite(now) || readings.length === 0) {
-      return Object.freeze({ ready: false, reason: "WAITING FOR MOTION", gravity: null });
-    }
-    const latest = readings.at(-1);
-    if (now - latest.receivedAt > config.maximumAgeMs) {
-      return Object.freeze({ ready: false, reason: "MOTION SAMPLE STALE", gravity: null });
-    }
-    const span = latest.receivedAt - readings[0].receivedAt;
-    if (readings.length < config.minimumSamples || span < config.minimumSpanMs) {
-      return Object.freeze({ ready: false, reason: "HOLD BIKE UPRIGHT & STILL", gravity: null });
-    }
+  function cancel(reason) {
+    terminal = result("cancelled", reason);
+    return terminal;
+  }
+
+  function complete() {
+    if (readings.length < config.minimumSamples) return cancel("INSUFFICIENT USABLE MOTION");
+    const span = readings.at(-1).receivedAt - readings[0].receivedAt;
+    if (span < config.minimumSpanMs) return cancel("INSUFFICIENT USABLE MOTION");
 
     const sum = readings.reduce(
       (total, reading) => ({
@@ -185,22 +162,79 @@ export function createBikeFrameCalibrationWindow({
       }),
       { x: 0, y: 0, z: 0 },
     );
-    const average = {
+    const gravity = {
       x: sum.x / readings.length,
       y: sum.y / readings.length,
       z: sum.z / readings.length,
     };
-    const averageDirection = normalize(average);
+    const averageDirection = normalize(gravity);
     const minimumCosine = Math.cos((config.maximumDirectionSpreadDegrees * Math.PI) / 180);
     if (readings.some((reading) => dot(reading.direction, averageDirection) < minimumCosine)) {
-      return Object.freeze({ ready: false, reason: "HOLD BIKE STEADY", gravity: null });
+      return cancel("REPOSITION BIKE");
     }
-    return Object.freeze({ ready: true, reason: "READY TO ZERO", gravity: Object.freeze(average) });
+    terminal = result("captured", "ZERO CAPTURED", gravity);
+    return terminal;
   }
 
-  function reset() {
+  function start(receivedAt = nowRef()) {
+    if (!Number.isFinite(receivedAt)) throw new RangeError("Calibration capture start time must be finite.");
+    startedAt = receivedAt;
     readings = [];
+    pendingReading = null;
+    baseline = null;
+    consecutiveDisturbances = 0;
+    terminal = null;
+    return snapshot(receivedAt);
   }
 
-  return Object.freeze({ add, snapshot, reset });
+  function add(sample, receivedAt = nowRef()) {
+    if (terminal || startedAt === null || !Number.isFinite(receivedAt) || receivedAt < startedAt) {
+      return snapshot(receivedAt);
+    }
+    if (receivedAt > startedAt + config.captureMs) return complete();
+
+    const gravity = motionGravity(sample);
+    const rate = motionRate(sample);
+    const gravityMagnitude = gravity ? magnitude(gravity) : 0;
+    const direction = gravity && gravityMagnitude >= config.minimumGravity
+      ? normalize(gravity)
+      : null;
+    const minimumCosine = Math.cos((config.maximumDirectionSpreadDegrees * Math.PI) / 180);
+    const individuallyValid =
+      gravity &&
+      rate &&
+      gravityMagnitude >= config.minimumGravity &&
+      gravityMagnitude <= config.maximumGravity &&
+      magnitude(rate) <= config.maximumRateDps;
+    const repositioning = baseline && direction && dot(direction, baseline) < minimumCosine;
+
+    if (!individuallyValid || repositioning) {
+      consecutiveDisturbances += 1;
+      if (consecutiveDisturbances > config.maximumConsecutiveDisturbances) {
+        return cancel(repositioning ? "REPOSITION BIKE" : "SUSTAINED MOTION");
+      }
+    } else if (!baseline) {
+      const reading = { receivedAt, gravity, direction };
+      if (pendingReading && dot(direction, pendingReading.direction) >= minimumCosine) {
+        baseline = pendingReading.direction;
+        readings.push(pendingReading, reading);
+      } else {
+        pendingReading = reading;
+      }
+      consecutiveDisturbances = 0;
+    } else {
+      consecutiveDisturbances = 0;
+      readings.push({ receivedAt, gravity, direction });
+    }
+    return receivedAt >= startedAt + config.captureMs ? complete() : snapshot(receivedAt);
+  }
+
+  function snapshot(now = nowRef()) {
+    if (terminal) return terminal;
+    if (startedAt === null) return result("idle", "TAP ZERO TO START");
+    if (Number.isFinite(now) && now >= startedAt + config.captureMs) return complete();
+    return result("capturing", "CAPTURING ZERO");
+  }
+
+  return Object.freeze({ start, add, snapshot });
 }

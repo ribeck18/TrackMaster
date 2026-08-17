@@ -29,5 +29,9 @@ export function createAccessOutcomeState() {
     return current;
   }
 
-  return Object.freeze({ record, initialize, getCurrent });
+  function getPending() {
+    return Object.freeze(Object.fromEntries(pending));
+  }
+
+  return Object.freeze({ record, initialize, getCurrent, getPending });
 }

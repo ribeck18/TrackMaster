@@ -53,15 +53,19 @@ test("parked SVG uses the exact viewBox, arc, tick, needle, and hub geometry", (
   assert.match(css, /\.gauge-hub \{[\s\S]*?stroke-width: 4/);
 });
 
-test("live lean geometry and stable ZERO readiness are wired on Ready", () => {
+test("live lean geometry and tap-initiated ZERO capture are wired on Ready", () => {
   assert.match(html, /data-lean-instrument/);
   assert.match(html, /data-calibration-status/);
-  assert.match(main, /createBikeFrameCalibrationWindow/);
-  assert.match(main, /leanEstimator\.calibrate\(readiness\.gravity\)/);
-  assert.match(main, /calibrationWindow\.add\(sample, monotonicNow\(\)\)/);
+  assert.match(main, /createBikeFrameCalibrationCapture/);
+  assert.match(main, /calibrationCapture\.start\(now\)/);
+  assert.match(main, /calibrationCapture\.add\(sample, monotonicNow\(\)\)/);
+  assert.match(main, /calibrationCaptureActive \? "CAPTURING ZERO" : "ZERO NOW"/);
+  assert.match(main, /window\.setTimeout\([\s\S]*?CALIBRATION_CAPTURE_MS \+ 1/);
+  assert.match(main, /leanEstimator\.calibrate\(outcome\.gravity\)/);
   assert.match(main, /isGyroDeliveryFresh\(lastGyroReceivedAt, now\)/);
   assert.match(main, /"CONTINUE WITHOUT LEAN"/);
   assert.match(main, /reading\.calibrated && isGyroDeliveryFresh/);
+  assert.doesNotMatch(main, /createBikeFrameCalibrationWindow|readiness\.ready|calibrationWindow\.reset/);
   assert.match(css, /\.gauge-active \{[\s\S]*?transition: d 80ms linear/);
   assert.match(css, /\.gauge-needle \{[\s\S]*?transition: x2 80ms linear, y2 80ms linear/);
 });

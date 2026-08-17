@@ -16,7 +16,8 @@ for (const sensor of ["motion", "location"]) {
 
 test("granted, denied, unavailable, and unsupported outcomes receive distinct visible labels", () => {
   assert.match(main, /resultOutput\.textContent = status\.toUpperCase\(\)/);
-  assert.match(main, /status === SENSOR_STATUS\.GRANTED \? "GRANTED" : "N\/A"/);
+  assert.match(main, /status === SENSOR_STATUS\.GRANTED/);
+  assert.match(main, /status === SENSOR_STATUS\.REQUESTING \? "WAITING" : "N\/A"/);
   assert.match(main, /SENSOR_STATUS\.DENIED/);
   assert.match(main, /SENSOR_STATUS\.UNAVAILABLE/);
   assert.match(main, /SENSOR_STATUS\.UNSUPPORTED/);
@@ -45,12 +46,15 @@ test("the app consumes both physical sensors through one subscription interface"
   assert.match(main, /sensorSource\.requestAccess\(\)/);
 });
 
-test("the Calibrate level is live and presents an explicit motion fallback", () => {
-  assert.match(html, /data-spirit-level aria-label="Live spirit level"/);
-  assert.match(html, /class="level__unavailable" hidden>MOTION N\/A/);
-  assert.match(main, /calculateBubbleOffset/);
-  assert.match(main, /--bubble-x/);
-  assert.match(main, /--bubble-y/);
+test("Calibrate guides an upright bike capture without a phone-level visual", async () => {
+  const css = await readFile(new URL("../css/app.css", import.meta.url), "utf8");
+  const sw = await readFile(new URL("../sw.js", import.meta.url), "utf8");
+  assert.match(html, /ZERO LEAN SENSOR/);
+  assert.match(html, /Hold the BIKE upright while zero is captured\./);
+  assert.match(main, /ZERO NOT CAPTURED · \$\{calibrationCaptureOutcome\.reason\} · TRY AGAIN/);
+  for (const source of [html, main, css, sw]) {
+    assert.doesNotMatch(source, /spirit-level|data-spirit-level|level__|calculateBubbleOffset|--bubble-[xy]/);
+  }
 });
 
 test("pagehide delegates bfcache-aware sensor cleanup without a once-only listener", () => {

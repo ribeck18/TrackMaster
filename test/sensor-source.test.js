@@ -103,7 +103,7 @@ test("iOS motion and location permission requests both start in the calling gest
 
   assert.equal(outcomes.motion.status, SENSOR_STATUS.GRANTED);
   assert.equal(outcomes.location.status, SENSOR_STATUS.GRANTED);
-  assert.ok(app.calls.includes("listen-deviceorientation"));
+  assert.ok(app.calls.includes("listen-devicemotion"));
   assert.equal(samples[0].type, "location");
   assert.equal(samples[0].speed, 10);
 });
@@ -119,7 +119,7 @@ test("motion denial and location grant resolve independently", async () => {
     motion: { status: SENSOR_STATUS.DENIED, reason: "Motion permission was denied." },
     location: { status: SENSOR_STATUS.GRANTED, reason: "" },
   });
-  assert.equal(app.calls.includes("listen-deviceorientation"), false);
+  assert.equal(app.calls.includes("listen-devicemotion"), false);
 });
 
 test("location denial and motion grant resolve independently", async () => {
@@ -248,20 +248,13 @@ test("first-fix timeout is unavailable, retains the watch, and recovers later", 
   assert.deepEqual(calls, ["watch"], "recovery uses the original live watch");
 });
 
-test("non-iOS motion falls through to direct event subscription", async () => {
+test("non-iOS motion falls through to direct gyroscope subscription", async () => {
   const app = harness({ requestPermission: false, geolocation: false });
-  const samples = [];
-  app.source.subscribe((sample) => samples.push(sample));
-
   const outcomes = await app.source.requestAccess();
   assert.equal(outcomes.motion.status, SENSOR_STATUS.GRANTED);
   assert.equal(outcomes.location.status, SENSOR_STATUS.UNSUPPORTED);
-  assert.ok(app.calls.includes("listen-deviceorientation"));
-
-  app.listeners.get("deviceorientation")({ beta: 4, gamma: -7, alpha: 20, timeStamp: 99 });
-  assert.deepEqual(samples, [
-    { type: "orientation", timestamp: 99, beta: 4, gamma: -7, alpha: 20 },
-  ]);
+  assert.ok(app.calls.includes("listen-devicemotion"));
+  assert.equal(app.calls.includes("listen-deviceorientation"), false);
 });
 
 test("browser-shaped alpha/beta/gamma are independently normalized to x/y/z at the seam", async () => {
@@ -269,6 +262,7 @@ test("browser-shaped alpha/beta/gamma are independently normalized to x/y/z at t
   const samples = [];
   app.source.subscribe((sample) => samples.push(sample));
   await app.source.requestAccess();
+  samples.length = 0;
 
   app.listeners.get("devicemotion")({
     timeStamp: 123,
@@ -380,7 +374,7 @@ test("destroy before a pending iOS grant prevents late listener attachment", asy
   app.resolveMotion("granted");
   await access;
 
-  assert.equal(app.calls.includes("listen-deviceorientation"), false);
+  assert.equal(app.calls.includes("listen-devicemotion"), false);
 });
 
 test("the unified subscription unsubscribe and destroy clean up platform streams", async () => {
@@ -390,12 +384,16 @@ test("the unified subscription unsubscribe and destroy clean up platform streams
   const access = app.source.requestAccess();
   app.succeedLocation();
   await access;
+  samples.length = 0;
 
   unsubscribe();
-  app.listeners.get("deviceorientation")({ beta: 1, gamma: 1, timeStamp: 1 });
-  assert.equal(samples.length, 1, "only the location sample arrived before unsubscribe");
+  app.listeners.get("devicemotion")({
+    accelerationIncludingGravity: { x: 0, y: 0, z: 9.8 },
+    rotationRate: { alpha: 0, beta: 0, gamma: 0 },
+  });
+  assert.equal(samples.length, 0, "no samples arrive after unsubscribe");
 
   app.source.destroy();
-  assert.ok(app.calls.includes("remove-deviceorientation"));
+  assert.ok(app.calls.includes("remove-devicemotion"));
   assert.ok(app.calls.includes("clear-41"));
 });
